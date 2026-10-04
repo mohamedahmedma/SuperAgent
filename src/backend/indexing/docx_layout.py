@@ -11,6 +11,7 @@ DOCX has no page geometry at parse time, so page_number is always 0 and `top` is
 monotonically increasing document-order surrogate (the contract's sort key).
 python-docx is imported lazily so importing this module stays cheap for non-DOCX flows.
 """
+
 from __future__ import annotations
 
 import re
@@ -61,19 +62,21 @@ def _paragraph_image_blocks(element, document, order: float) -> List[Dict[str, A
             continue
         if not data or not content_type:
             continue
-        blocks.append({
-            "type": "image",
-            "content": "",
-            "data": data,
-            "content_type": content_type,
-            "page_number": 0,
-            "top": order,
-        })
+        blocks.append(
+            {
+                "type": "image",
+                "content": "",
+                "data": data,
+                "content_type": content_type,
+                "page_number": 0,
+                "top": order,
+            }
+        )
     return blocks
 
 
 def _heading_level_from_style(style_name: str) -> Optional[int]:
-    """"Heading N" -> N, "Title" -> 1, anything else -> None (not a heading)."""
+    """ "Heading N" -> N, "Title" -> 1, anything else -> None (not a heading)."""
     name = (style_name or "").strip()
     if not name:
         return None
@@ -150,7 +153,7 @@ def parse_docx_blocks(file_path: str) -> List[Dict[str, Any]]:
 
     def next_paragraph_style(start: int) -> str:
         """The style of the next paragraph that has any text, or ""."""
-        for element in children[start + 1:]:
+        for element in children[start + 1 :]:
             if not element.tag.endswith("}p"):
                 return ""
             following = Paragraph(element, document)
@@ -187,7 +190,11 @@ def parse_docx_blocks(file_path: str) -> List[Dict[str, Any]]:
                 # are. That chunk then matched nothing and the list vanished from the
                 # results entirely, which is the failure keeping the list together was
                 # supposed to prevent.
-                if blocks and blocks[-1].get("type") in ("text", "heading") and not blocks[-1].get("list_group"):
+                if (
+                    blocks
+                    and blocks[-1].get("type") in ("text", "heading")
+                    and not blocks[-1].get("list_group")
+                ):
                     if len(blocks[-1].get("content") or "") <= _LEAD_IN_MAX_CHARS:
                         blocks[-1]["list_group"] = list_group
             elif not is_list_item:
@@ -198,34 +205,38 @@ def parse_docx_blocks(file_path: str) -> List[Dict[str, Any]]:
                 level = _LEAD_IN_LEVEL
             if level is not None:
                 in_list = False
-                blocks.append({
-                    "type": "heading",
-                    "content": text,
-                    "level": level,
-                    "page_number": 0,
-                    "top": order,
-                })
+                blocks.append(
+                    {
+                        "type": "heading",
+                        "content": text,
+                        "level": level,
+                        "page_number": 0,
+                        "top": order,
+                    }
+                )
             else:
-                blocks.append({
-                    "type": "text",
-                    "content": text,
-                    "page_number": 0,
-                    "top": order,
-                    "list_group": list_group if is_list_item else 0,
-                })
+                blocks.append(
+                    {
+                        "type": "text",
+                        "content": text,
+                        "page_number": 0,
+                        "top": order,
+                        "list_group": list_group if is_list_item else 0,
+                    }
+                )
         elif tag.endswith("}tbl"):
             table = Table(element, document)
-            rows = normalize_table_rows(
-                [[cell.text for cell in row.cells] for row in table.rows]
-            )
+            rows = normalize_table_rows([[cell.text for cell in row.cells] for row in table.rows])
             if rows:
-                blocks.append({
-                    "type": "table",
-                    "content": format_table_rows(rows),
-                    "rows": rows,
-                    "page_number": 0,
-                    "top": order,
-                })
+                blocks.append(
+                    {
+                        "type": "table",
+                        "content": format_table_rows(rows),
+                        "rows": rows,
+                        "page_number": 0,
+                        "top": order,
+                    }
+                )
         else:
             continue
         order += 1.0

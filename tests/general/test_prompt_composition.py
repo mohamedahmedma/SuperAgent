@@ -13,13 +13,14 @@ What these tests protect, in order of how expensive the failure is:
 * **The prompt stays small.** It is paid on every turn, so growth is a real cost and
   wants to be a deliberate, visible edit rather than a drift.
 """
+
 import unittest
 
 from jinja2 import UndefinedError
 
-from backend.agent.profiles.registry import load_profile
-from backend.agent.prompts import render, resolve, template_names
 from backend.agent.tools import GROUNDED_TOOLS, TOOL_BUILDERS
+from backend.profiles.registry import load_profile
+from backend.prompts import render, resolve, template_names
 
 # The prompt is paid on every turn. ~4 chars/token for English, so this is roughly a
 # 150-token ceiling — well above the ~96 it renders at today, but low enough that
@@ -48,7 +49,9 @@ class CompositionTests(unittest.TestCase):
         prompt = self.profile.render_system_prompt(["get_student_grades"])
         self.assertNotIn("[1]", prompt)
         self.assertNotIn("Grounding rules", prompt)
-        self.assertLess(len(prompt), len(self.profile.render_system_prompt(["search_knowledge_base"])))
+        self.assertLess(
+            len(prompt), len(self.profile.render_system_prompt(["search_knowledge_base"]))
+        )
 
     def test_every_grounded_tool_triggers_the_contract_on_its_own(self):
         for name in sorted(GROUNDED_TOOLS):
@@ -137,14 +140,12 @@ class SchoolOverrideKeepsTheContractTests(unittest.TestCase):
         self.profile = load_profile("school")
         # language="ar": the Egyptian register is appended only on an Arabic turn, so
         # rendering without a language would test a prompt that deliberately omits it.
-        self.prompt = self.profile.render_system_prompt(
-            ["search_knowledge_base"], language="ar"
-        )
+        self.prompt = self.profile.render_system_prompt(["search_knowledge_base"], language="ar")
 
     def test_every_grounding_rule_survives_the_override(self):
         """Compared against the fragment itself, so editing _grounding.j2 without
         updating school.yaml fails here rather than in production."""
-        from backend.agent.prompts import render
+        from backend.prompts import render
 
         fragment = render("agent/_grounding.j2")
         rules = [line.strip() for line in fragment.splitlines() if line.strip().startswith("-")]
@@ -184,7 +185,7 @@ class TemplateEnvironmentTests(unittest.TestCase):
         self.assertNotIn("42", rendered)
 
     def test_every_shipped_template_is_syntactically_valid(self):
-        from backend.agent.prompts import _environment
+        from backend.prompts import _environment
 
         names = template_names()
         self.assertTrue(names, "no templates were discovered")
@@ -199,8 +200,9 @@ class ResolveTests(unittest.TestCase):
     shipped template."""
 
     def test_an_override_wins_over_the_template(self):
-        out = resolve("Grade {question} against {context}", "rag/evidence_grade.j2",
-                      question="Q", context="C")
+        out = resolve(
+            "Grade {question} against {context}", "rag/evidence_grade.j2", question="Q", context="C"
+        )
         self.assertEqual("Grade Q against C", out)
 
     def test_no_override_falls_through_to_the_template(self):
@@ -222,8 +224,7 @@ class MigratedTemplateTests(unittest.TestCase):
     """Every prompt that moved out of profile YAML still substitutes its payload."""
 
     CASES = [
-        ("rag/evidence_grade.j2",
-         {"question": "Q", "context": "C", "constraints": ["CONDITION"]}),
+        ("rag/evidence_grade.j2", {"question": "Q", "context": "C", "constraints": ["CONDITION"]}),
         ("rag/complexity.j2", {"question": "Q"}),
         ("rag/rewrite.j2", {"query": "Q"}),
         ("agent/resume_answer.j2", {}),
@@ -239,7 +240,7 @@ class MigratedTemplateTests(unittest.TestCase):
                 for value in context.values():
                     # A list payload is joined into the prompt, never repr'd, so it is
                     # its ELEMENTS that have to survive substitution.
-                    for expected in (value if isinstance(value, list) else [value]):
+                    for expected in value if isinstance(value, list) else [value]:
                         self.assertIn(str(expected), out)
 
     def test_none_leaks_an_unrendered_placeholder(self):
@@ -369,7 +370,7 @@ class ToolResultEnvelopeTests(unittest.TestCase):
                 self.assertIn("girls only", out)
 
     def test_the_figure_rule_is_paid_only_when_a_figure_was_retrieved(self):
-        """Rung 3 of the ladder in backend/agent/prompts/__init__.py: an instruction that is
+        """Rung 3 of the ladder in backend/prompts/__init__.py: an instruction that is
         only true when retrieval returned a figure is billed only on those turns."""
         without = self._chunks(figures=False)
         with_rule = self._chunks(figures=True)
@@ -397,9 +398,7 @@ class ToolResultEnvelopeTests(unittest.TestCase):
 
     def test_the_figure_rule_is_not_hard_wrapped(self):
         out = self._chunks(figures=True)
-        self.assertIn(
-            "Write the same marker into your answer where the picture belongs", out
-        )
+        self.assertIn("Write the same marker into your answer where the picture belongs", out)
 
     def test_the_figure_rule_reaches_no_other_outcome(self):
         """A refusal or a clarification shows the model no chunk headers at all, so it
@@ -428,8 +427,12 @@ class ToolResultEnvelopeTests(unittest.TestCase):
         self.assertIn("Refusing here is the wrong outcome", with_guidance)
 
     def test_scope_options_appear_only_when_there_are_any(self):
-        with_options = render(self.TEMPLATE, outcome="needs_scope_selection",
-                              prompt="Which?", options=["Primary", "Secondary"])
+        with_options = render(
+            self.TEMPLATE,
+            outcome="needs_scope_selection",
+            prompt="Which?",
+            options=["Primary", "Secondary"],
+        )
         self.assertIn("Options: Primary; Secondary", with_options)
         self.assertNotIn(
             "Options:",
@@ -443,8 +446,12 @@ class ToolResultEnvelopeTests(unittest.TestCase):
 
         entry = _format_chunk(
             1,
-            {"filename": "kb.pdf", "page_number": 2, "text": "t",
-             "asset_ids": ["kb.pdf::p2::img0"]},
+            {
+                "filename": "kb.pdf",
+                "page_number": 2,
+                "text": "t",
+                "asset_ids": ["kb.pdf::p2::img0"],
+            },
             [1],
         )
         self.assertIn("[FIGURE 1]", entry)
@@ -520,7 +527,8 @@ class CachingContractTests(unittest.TestCase):
                 # Whatever follows the first difference is payload plus its labels; no
                 # instruction paragraph should be stranded down there.
                 self.assertLess(
-                    len(tail), 150,
+                    len(tail),
+                    150,
                     f"{name}: {len(tail)} chars sit after the first variable",
                 )
 
@@ -542,8 +550,11 @@ class CachingContractTests(unittest.TestCase):
         while prefix < min(len(short), len(long)) and short[prefix] == long[prefix]:
             prefix += 1
         self.assertLess(len(short[prefix:]), 150, short[prefix:])
-        self.assertIn("constraints_discriminate", short[:prefix],
-                      "the conditions instruction must sit inside the cacheable prefix")
+        self.assertIn(
+            "constraints_discriminate",
+            short[:prefix],
+            "the conditions instruction must sit inside the cacheable prefix",
+        )
 
 
 class GroundingContractTests(unittest.TestCase):

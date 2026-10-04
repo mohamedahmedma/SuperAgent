@@ -5,6 +5,7 @@ Most of these cases are about the value that is neither male nor female — beca
 child already on file is `unspecified`, and a system that treats that as a default sex
 will name the wrong child while the parent watches.
 """
+
 import pytest
 
 from sis.application.dto import ParsedRosterRow
@@ -19,12 +20,15 @@ class TestTheDomainValue:
         child = Student(student_number="S1", full_name_ar="ليلى", full_name_en="")
         assert child.gender is Gender.UNSPECIFIED
 
-    @pytest.mark.parametrize("stored,expected", [
-        ("male", Gender.MALE),
-        ("FEMALE", Gender.FEMALE),
-        ("Male", Gender.MALE),
-        (Gender.FEMALE, Gender.FEMALE),
-    ])
+    @pytest.mark.parametrize(
+        "stored,expected",
+        [
+            ("male", Gender.MALE),
+            ("FEMALE", Gender.FEMALE),
+            ("Male", Gender.MALE),
+            (Gender.FEMALE, Gender.FEMALE),
+        ],
+    )
     def test_a_stored_string_becomes_the_enum(self, stored, expected):
         """So a row read back from the database compares equal to one a service built."""
         child = Student(student_number="S1", full_name_ar="ع", full_name_en="", gender=stored)
@@ -47,7 +51,9 @@ class TestTheSpreadsheetCell:
     def test_the_words_a_school_types_for_a_boy(self, cell):
         assert _gender(cell) is Gender.MALE
 
-    @pytest.mark.parametrize("cell", ["أنثى", "انثى", "اناث", "بنت", "f", "female", "Girl", "طالبة"])
+    @pytest.mark.parametrize(
+        "cell", ["أنثى", "انثى", "اناث", "بنت", "f", "female", "Girl", "طالبة"]
+    )
     def test_the_words_a_school_types_for_a_girl(self, cell):
         """Both hamza spellings, because a registrar types whichever their keyboard gives."""
         assert _gender(cell) is Gender.FEMALE
@@ -78,8 +84,9 @@ class TestTheImport:
         then re-uploads a corrected name list that has no gender column — without this,
         every child silently reverts to unspecified and the feature stops working with no
         error anywhere."""
-        from sis.application.services.roster_import import _Assertion, RosterImportService
         from datetime import date
+
+        from sis.application.services.roster_import import RosterImportService, _Assertion
         from sis.domain.value_objects import AcademicYearCode, ClassCode
 
         existing = Student(
@@ -101,8 +108,9 @@ class TestTheImport:
         assert merged.gender is Gender.MALE
 
     def test_a_stated_sex_corrects_a_blank_one(self):
-        from sis.application.services.roster_import import _Assertion, RosterImportService
         from datetime import date
+
+        from sis.application.services.roster_import import RosterImportService, _Assertion
         from sis.domain.value_objects import AcademicYearCode, ClassCode
 
         existing = Student(student_number="S1", full_name_ar="علي", full_name_en="Ali")
@@ -125,8 +133,9 @@ class TestTheImport:
         """Commit rebuilds the assertion from this dict rather than from the file, so a
         field missing here previews correctly and is silently dropped on the way to
         being stored."""
-        from sis.application.services.roster_import import _Assertion, _K_GENDER
         from datetime import date
+
+        from sis.application.services.roster_import import _K_GENDER, _Assertion
         from sis.domain.value_objects import AcademicYearCode, ClassCode
 
         payload = _Assertion(
@@ -148,17 +157,33 @@ class TestItSurvivesTheDatabase:
         from sis.domain.people import Student as S
 
         with uow_factory() as uow:
-            uow.students.upsert_many([
-                S(student_number="G001", full_name_ar="علي", full_name_en="Ali", gender=Gender.MALE),
-                S(student_number="G002", full_name_ar="ليلى", full_name_en="Layla", gender=Gender.FEMALE),
-                S(student_number="G003", full_name_ar="سيد", full_name_en="Sayed"),
-            ])
+            uow.students.upsert_many(
+                [
+                    S(
+                        student_number="G001",
+                        full_name_ar="علي",
+                        full_name_en="Ali",
+                        gender=Gender.MALE,
+                    ),
+                    S(
+                        student_number="G002",
+                        full_name_ar="ليلى",
+                        full_name_en="Layla",
+                        gender=Gender.FEMALE,
+                    ),
+                    S(student_number="G003", full_name_ar="سيد", full_name_en="Sayed"),
+                ]
+            )
             uow.commit()
 
         with uow_factory() as uow:
-            found = uow.students.get_many([
-                StudentNumber("G001"), StudentNumber("G002"), StudentNumber("G003"),
-            ])
+            found = uow.students.get_many(
+                [
+                    StudentNumber("G001"),
+                    StudentNumber("G002"),
+                    StudentNumber("G003"),
+                ]
+            )
 
         assert found["G001"].gender is Gender.MALE
         assert found["G002"].gender is Gender.FEMALE
@@ -171,9 +196,9 @@ class TestItSurvivesTheDatabase:
             uow.students.upsert_many([S(student_number="G010", full_name_ar="ع", full_name_en="A")])
             uow.commit()
         with uow_factory() as uow:
-            created = uow.students.upsert_many([
-                S(student_number="G010", full_name_ar="ع", full_name_en="A", gender=Gender.MALE)
-            ])
+            created = uow.students.upsert_many(
+                [S(student_number="G010", full_name_ar="ع", full_name_en="A", gender=Gender.MALE)]
+            )
             uow.commit()
 
         assert created["G010"] is False

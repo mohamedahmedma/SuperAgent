@@ -13,6 +13,7 @@ in a unit test is a function of its inputs rather than of the day the suite happ
 run. "Is she currently in 3A" is `enrolment.covers(today)` with a `today` the caller
 supplies.
 """
+
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum

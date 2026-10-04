@@ -25,6 +25,7 @@ Comments are stripped before any pattern check. Several of these files legitimat
 the forbidden idioms in a comment explaining why they are forbidden, and a test that flagged
 its own rationale would be deleted within a week.
 """
+
 import json
 import re
 from pathlib import Path
@@ -58,9 +59,7 @@ def _relative(path: Path, root: Path) -> str:
 def _sources() -> list[tuple[str, str]]:
     """Every first-party source file in the console, as (relative path, text)."""
     files = sorted(
-        path
-        for pattern in ("*.js", "*.jsx", "*.css", "*.html")
-        for path in SRC.rglob(pattern)
+        path for pattern in ("*.js", "*.jsx", "*.css", "*.html") for path in SRC.rglob(pattern)
     )
     assert files, f"no console sources found under {SRC}"
     return [(_relative(f, SRC), f.read_text(encoding="utf-8")) for f in files]
@@ -68,11 +67,7 @@ def _sources() -> list[tuple[str, str]]:
 
 def _built() -> list[tuple[str, str]]:
     """Every text file in the build output, as (relative path, text)."""
-    files = sorted(
-        path
-        for pattern in ("*.html", "*.js", "*.css")
-        for path in WEB.rglob(pattern)
-    )
+    files = sorted(path for pattern in ("*.html", "*.js", "*.css") for path in WEB.rglob(pattern))
     assert files, (
         f"nothing is built into {WEB}. Run `npm run build` in sis/frontend — the app serves "
         "this directory, and an empty one is a console that 404s."
@@ -86,6 +81,7 @@ def _css(name: str) -> str:
 
 def _strip_comments(text: str) -> str:
     """Blank out HTML, JS and CSS comments, preserving line numbers for error messages."""
+
     def blank(m: re.Match[str]) -> str:
         return re.sub(r"[^\n]", " ", m.group(0))
 
@@ -186,7 +182,9 @@ def _client_calls() -> dict[str, tuple[str, tuple[str, ...]]]:
     calls: dict[str, tuple[str, tuple[str, ...]]] = {}
     for index, entry in enumerate(entries):
         name = entry.group(1)
-        body = text[entry.end() : entries[index + 1].start() if index + 1 < len(entries) else len(text)]
+        body = text[
+            entry.end() : entries[index + 1].start() if index + 1 < len(entries) else len(text)
+        ]
         call = re.search(r"return\s+(get|post|postForm|request)\(", body)
         if not call:
             continue
@@ -315,9 +313,7 @@ def test_every_request_body_key_is_one_the_route_declares() -> None:
                 if key in declared:
                     continue
                 line = body[: call.end() + offset].count("\n") + 1
-                nearest = sorted(
-                    (name for name in declared if key in name or name in key), key=len
-                )
+                nearest = sorted((name for name in declared if key in name or name in key), key=len)
                 hint = f"; did you mean {nearest[0]!r}?" if nearest else ""
                 offenders.append(
                     f"{path}:{line} api.{call.group(1)}() sends {key!r}, which its route "
@@ -554,9 +550,7 @@ def test_the_entry_point_is_revalidated_and_the_hashed_assets_are_not() -> None:
 
         # The other half: revalidation still short-circuits, so a reload costs a header
         # exchange rather than the file.
-        again = client.get(
-            "/ui/index.html", headers={"If-None-Match": entry.headers["etag"]}
-        )
+        again = client.get("/ui/index.html", headers={"If-None-Match": entry.headers["etag"]})
         assert again.status_code == 304, "`no-cache` is not `no-store`; 304 must still work"
         assert not again.content
 
@@ -785,8 +779,6 @@ def test_the_action_colour_is_systemblue_with_its_stated_label() -> None:
     """
     tokens = _css("tokens.css")
 
-    literals = dict(re.findall(r"(--[\w-]+)\s*:\s*(#[0-9a-fA-F]{6})", tokens))
-
     def resolve(name: str) -> str:
         """Follow the small chain of semantic theme variables to its literal colour."""
         current = name
@@ -844,6 +836,7 @@ def test_the_action_hover_darkens_so_a_light_label_survives_it() -> None:
     colour stays a design choice while the direction stays a rule.
     """
     tokens = _css("tokens.css")
+
     def luminance(colour: str) -> float:
         def channel(part: str) -> float:
             value = int(part, 16) / 255
@@ -862,11 +855,13 @@ def test_the_action_hover_darkens_so_a_light_label_survives_it() -> None:
     # Every theme block declares the trio, and each is checked on its own: the toggle's copy of
     # the dark theme is written out separately from the media query's, and a fix applied to one
     # and not the other is exactly the bug that duplication invites.
-    blocks = list(zip(
-        re.findall(r"--theme-primary:\s*(#[0-9a-fA-F]{6});", tokens),
-        re.findall(r"--theme-primary-hover:\s*(#[0-9a-fA-F]{6});", tokens),
-        re.findall(r"--theme-primary-ink:\s*(#[0-9a-fA-F]{6});", tokens),
-    ))
+    blocks = list(
+        zip(
+            re.findall(r"--theme-primary:\s*(#[0-9a-fA-F]{6});", tokens),
+            re.findall(r"--theme-primary-hover:\s*(#[0-9a-fA-F]{6});", tokens),
+            re.findall(r"--theme-primary-ink:\s*(#[0-9a-fA-F]{6});", tokens),
+        )
+    )
     assert len(blocks) == 3, (
         f"expected the action trio in all three theme blocks, found {len(blocks)}. The light "
         "theme, the `prefers-color-scheme` block and the `[data-theme=dark]` block each declare "
@@ -921,9 +916,8 @@ def test_the_grey_ramp_is_apples_and_anchored_on_the_stated_grey() -> None:
             wrong.append(f"{name} {value} is warm; every step in this ramp leans cool")
         elif blue - red > 6:
             wrong.append(f"{name} {value} is tinted {blue - red} points, deeper than a cast")
-    assert not wrong, (
-        "the ramp is Apple's system greys; these steps are not:\n  "
-        + "\n  ".join(wrong)
+    assert not wrong, "the ramp is Apple's system greys; these steps are not:\n  " + "\n  ".join(
+        wrong
     )
 
 
@@ -1007,7 +1001,7 @@ def test_the_default_page_is_off_white_rather_than_white() -> None:
     # on a dark theme.
     dark_blocks = re.findall(r"--theme-bg-canvas\s*:\s*#[0-9a-fA-F]{6}\s*;", tokens)
     assert len(dark_blocks) == 3, (
-            f"expected a --theme-bg-canvas in all three theme blocks, found {len(dark_blocks)}. The light "
+        f"expected a --theme-bg-canvas in all three theme blocks, found {len(dark_blocks)}. The light "
         "theme, the `prefers-color-scheme` block and the `[data-theme=dark]` block each declare "
         "the page colour, and a block missing one inherits the wrong theme's page."
     )
@@ -1051,13 +1045,9 @@ def test_one_attribute_carries_the_theme() -> None:
 def test_appearance_has_exactly_light_and_dark() -> None:
     """Phase 2 exposes two formal modes and no custom palette disguised as more themes."""
     store = _strip_comments((SRC / "store.js").read_text(encoding="utf-8"))
-    settings = _strip_comments(
-        (SRC / "components" / "Settings.jsx").read_text(encoding="utf-8")
-    )
+    settings = _strip_comments((SRC / "components" / "Settings.jsx").read_text(encoding="utf-8"))
 
-    appearances = re.findall(
-        r"value:\s*['\"](light|dark|system)['\"]\s*,\s*label:", settings
-    )
+    appearances = re.findall(r"value:\s*['\"](light|dark|system)['\"]\s*,\s*label:", settings)
     assert appearances == ["light", "dark"]
     assert "setTint" not in store
     assert "currentTint" not in store
@@ -1147,8 +1137,8 @@ def test_every_duration_is_scaled_by_one_variable() -> None:
     for m in re.finditer(r"--dur-[\w-]+\s*:\s*([^;]+)", tokens):
         assert "--motion-scale" in m.group(1), f"duration token not scaled: {m.group(0).strip()}"
 
-    assert not offenders, (
-        "use a --dur-* token so --motion-scale governs it:\n  " + "\n  ".join(offenders)
+    assert not offenders, "use a --dur-* token so --motion-scale governs it:\n  " + "\n  ".join(
+        offenders
     )
 
 

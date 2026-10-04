@@ -6,6 +6,7 @@ writes. Get that backwards and a file dropped in the wrong column leaves the cor
 a state the form cannot express: one side indexed, the entry unpaired, and the admin
 with no obvious way back.
 """
+
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -30,7 +31,9 @@ def _chunks(text):
 
 class PairUploadJobTests(unittest.TestCase):
     def setUp(self):
-        self.pairs = DocumentPairService(unit_of_work=postgres_schema(self, DocumentPair).unit_of_work)
+        self.pairs = DocumentPairService(
+            unit_of_work=postgres_schema(self, DocumentPair).unit_of_work
+        )
 
         import backend.api.routes.documents as documents
 
@@ -63,10 +66,12 @@ class PairUploadJobTests(unittest.TestCase):
     def test_both_sides_are_indexed_and_recorded_as_one_entry(self):
         self.loader.load_document.side_effect = [_chunks(ARABIC_BODY), _chunks(ENGLISH_BODY)]
 
-        self._run([
-            (ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx"),
-            (ENGLISH, "/tmp/fees_en.docx", "fees_en.docx"),
-        ])
+        self._run(
+            [
+                (ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx"),
+                (ENGLISH, "/tmp/fees_en.docx", "fees_en.docx"),
+            ]
+        )
 
         self.jobs.fail_job.assert_not_called()
         self.assertEqual(2, self.writer.write_documents.call_count)
@@ -108,10 +113,12 @@ class PairUploadJobTests(unittest.TestCase):
         """
         self.loader.load_document.side_effect = [_chunks(ARABIC_BODY), _chunks(ARABIC_BODY)]
 
-        self._run([
-            (ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx"),
-            (ENGLISH, "/tmp/fees_en.docx", "fees_en.docx"),
-        ])
+        self._run(
+            [
+                (ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx"),
+                (ENGLISH, "/tmp/fees_en.docx", "fees_en.docx"),
+            ]
+        )
 
         self._failure()
         self.writer.write_documents.assert_not_called()
@@ -127,7 +134,9 @@ class PairUploadJobTests(unittest.TestCase):
         pair_id = self.pairs.list_pairs()[0].pair_id
 
         self.loader.load_document.side_effect = [_chunks(ARABIC_BODY)]
-        self._run([(ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx")], pair_id=pair_id, title="Fees policy")
+        self._run(
+            [(ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx")], pair_id=pair_id, title="Fees policy"
+        )
 
         rows = self.pairs.list_pairs()
         self.assertEqual(1, len(rows), "a second entry was created instead of filling the first")
@@ -165,16 +174,19 @@ class PairUploadJobTests(unittest.TestCase):
         """
         self.loader.load_document.side_effect = [_chunks(ARABIC_BODY), _chunks(ENGLISH_BODY)]
 
-        self._run([
-            (ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx"),
-            (ENGLISH, "/tmp/fees_en.docx", "fees_en.docx"),
-        ])
+        self._run(
+            [
+                (ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx"),
+                (ENGLISH, "/tmp/fees_en.docx", "fees_en.docx"),
+            ]
+        )
 
         self.jobs.fail_job.assert_not_called()
         self.assertEqual(2, self.remover.remove.call_count)
         for call in self.remover.remove.call_args_list:
             self.assertIs(
-                False, call.kwargs.get("include_assets"),
+                False,
+                call.kwargs.get("include_assets"),
                 "the pair job must ask the cleanup to spare asset rows, since its own "
                 "parse step has already written them",
             )

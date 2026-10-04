@@ -9,9 +9,9 @@ evidence, which is the failure the pipeline exists to prevent. Grading unnecessa
 only costs time. So every signal must agree before the grader is skipped, and these
 tests are weighted toward proving it is NOT skipped when it matters.
 """
+
 import unittest
 
-from backend.agent.profiles.registry import load_profile
 from backend.agent.rag.confidence import (
     ConfidenceVerdict,
     assess,
@@ -20,6 +20,7 @@ from backend.agent.rag.confidence import (
     should_grade,
     term_coverage,
 )
+from backend.profiles.registry import load_profile
 
 
 def rag_config(**overrides):
@@ -130,22 +131,25 @@ class GradingModeTests(unittest.TestCase):
         self.strong = [doc("The school partners are the university and the council.")] * 4
 
     def test_always_grades_regardless_of_confidence(self):
-        need, verdict = should_grade("what are the school partners", self.strong, {},
-                                     rag_config(grading_mode="always"))
+        need, verdict = should_grade(
+            "what are the school partners", self.strong, {}, rag_config(grading_mode="always")
+        )
         self.assertTrue(need)
         self.assertIn("grading_mode=always", verdict.reasons)
 
     def test_never_skips_regardless_of_confidence(self):
-        need, verdict = should_grade("quantum entanglement", [doc("uniform policy")], {},
-                                     rag_config(grading_mode="never"))
+        need, verdict = should_grade(
+            "quantum entanglement", [doc("uniform policy")], {}, rag_config(grading_mode="never")
+        )
         self.assertFalse(need)
         self.assertIn("grading_mode=never", verdict.reasons)
 
     def test_uncertain_only_decides_per_query(self):
         config = rag_config(grading_mode="uncertain_only")
         self.assertFalse(should_grade("what are the school partners", self.strong, {}, config)[0])
-        self.assertTrue(should_grade("scholarship deadlines abroad",
-                                     [doc("uniform policy")] * 4, {}, config)[0])
+        self.assertTrue(
+            should_grade("scholarship deadlines abroad", [doc("uniform policy")] * 4, {}, config)[0]
+        )
 
     def test_the_shipped_default_is_always(self):
         """Held at `always` until a semantic assessor replaces lexical coverage. The
@@ -161,7 +165,7 @@ class SkippedGradeShapeTests(unittest.TestCase):
         be enforced by a helper that hand-built a fake grade; it is now structural — the
         report's ambiguity defaults to the inert value and only an LLM assessor sets it,
         so no cheap rung can invent an ambiguity it never assessed."""
-        from backend.agent.rag.evidence import LexicalAssessor, AssessmentContext
+        from backend.agent.rag.evidence import AssessmentContext, LexicalAssessor
         from backend.agent.rag.policy import decide_route
 
         config = rag_config()
@@ -176,16 +180,18 @@ class SkippedGradeShapeTests(unittest.TestCase):
 
         # And a LOW-certainty report cannot claim sufficiency either: with the profile
         # requiring `high`, acting on it is refused rather than guessed.
-        route, reason = decide_route(report, has_docs=True, rewrite_count=0,
-                                     is_sub_agent=False, config=config)
+        route, reason = decide_route(
+            report, has_docs=True, rewrite_count=0, is_sub_agent=False, config=config
+        )
         self.assertNotIn(route, ("clarify", "scope_select"))
         self.assertEqual("retrieval_error", route)
         self.assertIn("requires high", reason)
 
     def test_the_decision_is_recorded_in_the_trace(self):
         """A skipped grade must be visible, not invisible."""
-        verdict = ConfidenceVerdict(confident=True, term_coverage=0.9, chunk_count=4,
-                                    reasons=["4 chunks"])
+        verdict = ConfidenceVerdict(
+            confident=True, term_coverage=0.9, chunk_count=4, reasons=["4 chunks"]
+        )
         trace = verdict.as_trace()
         self.assertTrue(trace["grading_confident"])
         self.assertEqual(0.9, trace["grading_term_coverage"])
@@ -195,11 +201,15 @@ class SkippedGradeShapeTests(unittest.TestCase):
     def test_the_trace_schema_carries_the_new_fields(self):
         from backend.agent.schemas.chat import normalize_rag_trace
 
-        trace = normalize_rag_trace({
-            "grading_skipped": True, "grading_confident": True,
-            "grading_term_coverage": 0.9, "grading_chunk_count": 4,
-            "grading_reason": "4 chunks",
-        })
+        trace = normalize_rag_trace(
+            {
+                "grading_skipped": True,
+                "grading_confident": True,
+                "grading_term_coverage": 0.9,
+                "grading_chunk_count": 4,
+                "grading_reason": "4 chunks",
+            }
+        )
         self.assertTrue(trace["grading_skipped"])
         self.assertEqual(0.9, trace["grading_term_coverage"])
 

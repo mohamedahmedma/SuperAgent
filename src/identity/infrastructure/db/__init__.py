@@ -4,6 +4,7 @@
 `models.py` declares the four tables this service owns, `schema.py` creates them, and
 `repositories/` implements the ports the use cases declared.
 """
+
 from identity.infrastructure.db.base import Base
 from identity.infrastructure.db.schema import init_db
 from identity.infrastructure.db.session import (

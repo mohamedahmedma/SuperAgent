@@ -126,8 +126,7 @@ class ChatRequestContext:
             self.caller = CallerIdentity.for_user(self.user_id)
         elif self.caller.user_id != self.user_id:
             raise ValueError(
-                f"caller.user_id {self.caller.user_id!r} does not match "
-                f"user_id {self.user_id!r}"
+                f"caller.user_id {self.caller.user_id!r} does not match user_id {self.user_id!r}"
             )
 
     # Read-only views onto the caller. Properties rather than fields so there is
@@ -394,7 +393,7 @@ class ChatRequestContext:
         Reported BY the tool, with the same string it hands its own template, rather than
         read back out of the rendered text. Parsing the render would put the outcome in
         two places — a branch here and a sentence in
-        `backend/agent/prompts/templates/tools/records_result.j2` — that could be edited apart,
+        `backend/prompts/templates/tools/records_result.j2` — that could be edited apart,
         and the wording is translated copy that is expected to change.
         """
         if not tool or not outcome:
@@ -576,7 +575,7 @@ class ChatRequestContext:
     def acquire_knowledge_tool_slot(self) -> bool:
         # Budget comes from the profile: a catalogue deployment may legitimately allow
         # more knowledge calls per turn than a single-shot document assistant.
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         limit = get_profile().agent.max_knowledge_calls_per_turn
         with self._lock:

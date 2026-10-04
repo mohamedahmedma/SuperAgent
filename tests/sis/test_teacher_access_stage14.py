@@ -1,4 +1,5 @@
 """Stage 14: a teacher's boundary is the exact class-subject assignment."""
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -31,12 +32,14 @@ def _teacher(client: TestClient) -> dict[str, str]:
         assert math and p1a and p1b
         for section in (p1a, p1b):
             _grant(session, user_id, RoleCode.TEACHER, ScopeType.CLASS_SECTION, section.id)
-            session.add(m.TeacherClassSection(
-                teacher_id=teacher.id,
-                class_section_id=section.id,
-                subject_id=math.id,
-                assigned_by="test",
-            ))
+            session.add(
+                m.TeacherClassSection(
+                    teacher_id=teacher.id,
+                    class_section_id=section.id,
+                    subject_id=math.id,
+                    assigned_by="test",
+                )
+            )
         uow.commit()
     return _sign_in(client, "stage14.teacher")
 
@@ -51,53 +54,60 @@ def test_teacher_discovers_all_assigned_classes_and_only_those(
         params={"academic_year": YEAR},
     )
     assert response.status_code == 200, response.text
-    assert {
-        (row["class_code"], row["subject_code"])
-        for row in response.json()["assignments"]
-    } == {("P1A", "MATH"), ("P1B", "MATH")}
+    assert {(row["class_code"], row["subject_code"]) for row in response.json()["assignments"]} == {
+        ("P1A", "MATH"),
+        ("P1B", "MATH"),
+    }
 
 
-def test_teacher_cannot_read_or_write_an_unrelated_class(
-    client: TestClient, school: None
-) -> None:
+def test_teacher_cannot_read_or_write_an_unrelated_class(client: TestClient, school: None) -> None:
     headers = _teacher(client)
     query = {"academic_year": YEAR, "term": f"{YEAR}-T1", "subject": "MATH"}
     assert client.get("/v1/classes/LGA/grades", headers=headers, params=query).status_code == 403
-    assert client.put(
-        "/v1/classes/LGA/grades",
-        headers=headers,
-        params={"academic_year": YEAR},
-        json={
-            "term_code": f"{YEAR}-T1",
-            "subject_code": "MATH",
-            "marks": [{"student_number": "100", "percentage": 90}],
-        },
-    ).status_code == 403
+    assert (
+        client.put(
+            "/v1/classes/LGA/grades",
+            headers=headers,
+            params={"academic_year": YEAR},
+            json={
+                "term_code": f"{YEAR}-T1",
+                "subject_code": "MATH",
+                "marks": [{"student_number": "100", "percentage": 90}],
+            },
+        ).status_code
+        == 403
+    )
 
 
 def test_teacher_cannot_read_or_write_a_colleagues_subject_in_their_class(
     client: TestClient, school: None, registrar: dict[str, str]
 ) -> None:
-    assert client.post(
-        "/v1/subjects",
-        headers=registrar,
-        json={
-            "code": "ARAB",
-            "academic_year_code": YEAR,
-            "name_en": "Arabic",
-            "name_ar": "Arabic",
-        },
-    ).status_code == 201
-    assert client.put(
-        "/v1/subject-assignments",
-        headers=registrar,
-        json={
-            "academic_year_code": YEAR,
-            "subject_code": "ARAB",
-            "year_level_code": "AR-P1",
-            "assigned": True,
-        },
-    ).status_code == 204
+    assert (
+        client.post(
+            "/v1/subjects",
+            headers=registrar,
+            json={
+                "code": "ARAB",
+                "academic_year_code": YEAR,
+                "name_en": "Arabic",
+                "name_ar": "Arabic",
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.put(
+            "/v1/subject-assignments",
+            headers=registrar,
+            json={
+                "academic_year_code": YEAR,
+                "subject_code": "ARAB",
+                "year_level_code": "AR-P1",
+                "assigned": True,
+            },
+        ).status_code
+        == 204
+    )
     headers = _teacher(client)
     query = {"academic_year": YEAR, "term": f"{YEAR}-T1", "subject": "ARAB"}
     denied_read = client.get("/v1/classes/P1A/grades", headers=headers, params=query)

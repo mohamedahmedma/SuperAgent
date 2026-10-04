@@ -9,6 +9,7 @@ school's verification code to, which in production they cannot possibly know.
 So the assertions here are about the one thing that distinguishes a working sign-in from
 a broken one: whether there is a number in the path.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 

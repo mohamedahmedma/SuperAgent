@@ -22,6 +22,7 @@ why half a year group has no grades.
 module imports sqlalchemy, fastapi or pydantic, and it must stay that way: these types
 are what the unit tests of `application/services/` are written against.
 """
+
 import math
 import re
 from dataclasses import dataclass
@@ -351,9 +352,7 @@ class Phone:
         return parsed
 
     @classmethod
-    def parse_optional(
-        cls, raw: object, *, default_country_code: str
-    ) -> "Phone | None":
+    def parse_optional(cls, raw: object, *, default_country_code: str) -> "Phone | None":
         """Normalise a cell to E.164, or `None` when the cell is genuinely empty.
 
         `None` for blank rather than an exception, so a caller can tell "this guardian has
@@ -377,8 +376,7 @@ class Phone:
         for character in body:
             if not character.isdigit() and character not in _PHONE_SEPARATORS:
                 raise InvalidPhone(
-                    f"{cls.LABEL} may hold only digits and separators "
-                    f"(got {raw!r})",
+                    f"{cls.LABEL} may hold only digits and separators (got {raw!r})",
                     field=cls.FIELD,
                 )
 
@@ -389,9 +387,7 @@ class Phone:
         return cls("+" + cls._to_international(digits, international, default_country_code))
 
     @classmethod
-    def _to_international(
-        cls, digits: str, has_plus: bool, default_country_code: str
-    ) -> str:
+    def _to_international(cls, digits: str, has_plus: bool, default_country_code: str) -> str:
         """Resolve national spellings against a default country. See the ambiguity note.
 
         Three of the four cases are unambiguous. A leading `+` and a leading `00` both
@@ -436,9 +432,7 @@ class Phone:
         if isinstance(raw, str):
             return raw
         if isinstance(raw, bool):
-            raise InvalidPhone(
-                f"{cls.LABEL} must be text, not a boolean", field=cls.FIELD
-            )
+            raise InvalidPhone(f"{cls.LABEL} must be text, not a boolean", field=cls.FIELD)
         if isinstance(raw, int):
             return str(raw)
         if isinstance(raw, float):
@@ -507,8 +501,7 @@ class Percentage:
             )
         if number < cls.MINIMUM or number > cls.MAXIMUM:
             raise InvalidPercentage(
-                f"percentage must be between {cls.MINIMUM:g} and {cls.MAXIMUM:g} "
-                f"(got {number:g})",
+                f"percentage must be between {cls.MINIMUM:g} and {cls.MAXIMUM:g} (got {number:g})",
                 field="percentage",
             )
         return number

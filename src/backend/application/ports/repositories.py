@@ -12,6 +12,7 @@ repository is still attached to its session: reading a lazy attribute after the 
 work has closed raises, and assigning to one is a change nobody will ever commit. A
 record is only data.
 """
+
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
@@ -20,8 +21,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    # Named only in annotations. Importing from `backend.indexing` at runtime runs its
-    # package `__init__`, which loads the document loader, Milvus and the embedder.
+    # Named only in annotations. Importing `backend.indexing` or `backend.assets` at
+    # runtime runs the package `__init__`, which loads the document loader, Milvus, the
+    # embedder or the asset store.
+    from backend.assets.dossier import AssetDossier
     from backend.indexing.section_summary import SectionRecord
 
 
@@ -177,8 +180,7 @@ class ChatAttachmentRepository(Protocol):
         """Stage the attachment for `username`; None only for an unknown user."""
         ...
 
-    def get(self, username: str, attachment_id: str) -> AttachmentRecord | None:
-        ...
+    def get(self, username: str, attachment_id: str) -> AttachmentRecord | None: ...
 
     def get_many(self, username: str, attachment_ids: Sequence[str]) -> Sequence[AttachmentRecord]:
         """The owner's attachments among `attachment_ids`, in no particular order."""
@@ -213,8 +215,7 @@ class DocumentPairRepository(Protocol):
         """Every entry, newest first."""
         ...
 
-    def get(self, pair_id: str) -> DocumentPairRecord | None:
-        ...
+    def get(self, pair_id: str) -> DocumentPairRecord | None: ...
 
     def holding(self, filename: str) -> Sequence[DocumentPairRecord]:
         """The entries naming `filename` on either side, oldest first."""
@@ -293,8 +294,7 @@ class DigestRecord:
 
 
 class SectionSummaryRepository(Protocol):
-    def for_profile(self, profile: str) -> Sequence[SectionRecord]:
-        ...
+    def for_profile(self, profile: str) -> Sequence[SectionRecord]: ...
 
     def hashes(self, profile: str) -> dict[str, str]:
         """chunk_id -> content hash, for deciding what needs re-summarising."""
@@ -310,11 +310,9 @@ class SectionSummaryRepository(Protocol):
 
 
 class CorpusDigestRepository(Protocol):
-    def get(self, profile: str) -> DigestRecord | None:
-        ...
+    def get(self, profile: str) -> DigestRecord | None: ...
 
-    def save(self, profile: str, digest: DigestRecord) -> None:
-        ...
+    def save(self, profile: str, digest: DigestRecord) -> None: ...
 
 
 # -- assets ---------------------------------------------------------------------------
@@ -345,8 +343,7 @@ class DocumentAssetRepository(Protocol):
         """Insert each dossier, or replace the stored one with the same asset id."""
         ...
 
-    def get(self, asset_id: str) -> AssetDossier | None:
-        ...
+    def get(self, asset_id: str) -> AssetDossier | None: ...
 
     def get_many(self, asset_ids: Sequence[str]) -> Sequence[AssetDossier]:
         """The stored dossiers among `asset_ids`, in no particular order."""
@@ -372,18 +369,17 @@ class DocumentAssetRepository(Protocol):
         """Clear the review flag on every occurrence of these bytes; returns how many."""
         ...
 
-    def older_than(self, dossier_version: int, *, after_asset_id: str, limit: int) -> Sequence[AssetDossier]:
+    def older_than(
+        self, dossier_version: int, *, after_asset_id: str, limit: int
+    ) -> Sequence[AssetDossier]:
         """The next page of occurrences below `dossier_version`, keyset-paginated by id."""
         ...
 
-    def status_counts(self) -> dict[str, int]:
-        ...
+    def status_counts(self) -> dict[str, int]: ...
 
-    def occurrence_count(self) -> int:
-        ...
+    def occurrence_count(self) -> int: ...
 
-    def distinct_image_count(self) -> int:
-        ...
+    def distinct_image_count(self) -> int: ...
 
 
 class AssetExtractionRepository(Protocol):
@@ -391,8 +387,7 @@ class AssetExtractionRepository(Protocol):
 
     def find_many(
         self, digests: Collection[str], profile: str, dossier_version: int
-    ) -> Sequence[StoredExtraction]:
-        ...
+    ) -> Sequence[StoredExtraction]: ...
 
     def save(
         self,
@@ -412,8 +407,7 @@ class AssetExtractionRepository(Protocol):
         """Record that a human accepted this extraction. False if there is no such row."""
         ...
 
-    def count(self) -> int:
-        ...
+    def count(self) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -434,8 +428,7 @@ class EntityAttributeRepository(Protocol):
         """Make `rows` the asset's entire attribute set."""
         ...
 
-    def delete_for_assets(self, asset_ids: Sequence[str]) -> int:
-        ...
+    def delete_for_assets(self, asset_ids: Sequence[str]) -> int: ...
 
     def matching_asset_ids(
         self,
@@ -466,8 +459,7 @@ class EntityAttributeRepository(Protocol):
         """
         ...
 
-    def stats(self) -> dict:
-        ...
+    def stats(self) -> dict: ...
 
 
 # -- ingest jobs ----------------------------------------------------------------------
@@ -511,8 +503,7 @@ class IngestJobRecord:
 
 
 class IngestJobRepository(Protocol):
-    def add(self, job: IngestJobRecord) -> None:
-        ...
+    def add(self, job: IngestJobRecord) -> None: ...
 
     def get(self, kind: str, job_id: str, *, for_update: bool = False) -> IngestJobRecord | None:
         """The job, optionally row-locked until the transaction ends."""
@@ -526,5 +517,4 @@ class IngestJobRepository(Protocol):
         """The newest jobs of `kind`, newest first."""
         ...
 
-    def delete_older_than(self, kind: str, cutoff: datetime) -> int:
-        ...
+    def delete_older_than(self, kind: str, cutoff: datetime) -> int: ...

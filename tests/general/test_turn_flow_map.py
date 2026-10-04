@@ -9,6 +9,7 @@ box may be left floating — a step with no edge is a step whose place in the tu
 
 Nothing is rendered and nothing leaves the machine: the chart is built as text only.
 """
+
 import unittest
 
 from backend.graphs import flow
@@ -44,7 +45,11 @@ class TurnFlowMapTests(unittest.TestCase):
         nodes = set()
         for planning in (True, False):
             nodes |= {node.name for node in build_rag_graph(planning).get_graph().nodes.values()}
-        named = set(self.flow.RAG_NOTES) | self.flow.RAG_MODEL_NODES | set(self.flow.RAG_RETRIEVAL_ENTRY)
+        named = (
+            set(self.flow.RAG_NOTES)
+            | self.flow.RAG_MODEL_NODES
+            | set(self.flow.RAG_RETRIEVAL_ENTRY)
+        )
         self.assertEqual(set(), named - nodes)
 
     def test_the_live_graphs_are_drawn_whole(self):
@@ -64,7 +69,9 @@ class TurnFlowMapTests(unittest.TestCase):
         """
         target = self.flow.build_target()
         drawn = set(target.nodes)
-        self.assertEqual([], [(a, b) for a, b, _, _ in target.edges if a not in drawn or b not in drawn])
+        self.assertEqual(
+            [], [(a, b) for a, b, _, _ in target.edges if a not in drawn or b not in drawn]
+        )
         joined = {end for a, b, _, _ in target.edges for end in (a, b)}
         self.assertEqual([], sorted(drawn - joined))
         self.assertIn("flowchart TD", target.render())

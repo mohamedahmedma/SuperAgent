@@ -49,14 +49,14 @@ Revises: 0003
 Created: 2026-08-20
 
 """
+
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = '0004'
-down_revision: str | None = '0003'
+revision: str = "0004"
+down_revision: str | None = "0003"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -150,9 +150,7 @@ def upgrade() -> None:
         )
 
     if school_id is not None:
-        bind.execute(
-            sa.text("UPDATE year_levels SET school_id = :school"), {"school": school_id}
-        )
+        bind.execute(sa.text("UPDATE year_levels SET school_id = :school"), {"school": school_id})
 
     with op.batch_alter_table("year_levels", schema=None) as batch_op:
         batch_op.alter_column("school_id", existing_type=sa.Integer(), nullable=False)
@@ -164,9 +162,7 @@ def upgrade() -> None:
             ["id"],
             ondelete="RESTRICT",
         )
-        batch_op.create_unique_constraint(
-            "uq_year_levels_school_code", ["school_id", "code"]
-        )
+        batch_op.create_unique_constraint("uq_year_levels_school_code", ["school_id", "code"])
         batch_op.drop_index("ix_year_levels_order")
         batch_op.create_index("ix_year_levels_school_id", ["school_id"], unique=False)
         batch_op.create_index(
@@ -224,9 +220,7 @@ def upgrade() -> None:
         batch_op.create_index(
             "ix_attendance_section_day", ["class_section_id", "on_date"], unique=False
         )
-        batch_op.create_index(
-            "ix_attendance_student_day", ["student_id", "on_date"], unique=False
-        )
+        batch_op.create_index("ix_attendance_student_day", ["student_id", "on_date"], unique=False)
 
 
 def downgrade() -> None:
@@ -283,9 +277,7 @@ def downgrade() -> None:
         batch_op.drop_index("ix_year_levels_school_id")
         batch_op.create_index("ix_year_levels_order", ["display_order"], unique=False)
         batch_op.drop_constraint("uq_year_levels_school_code", type_="unique")
-        batch_op.drop_constraint(
-            batch_op.f("fk_year_levels_school_id_schools"), type_="foreignkey"
-        )
+        batch_op.drop_constraint(batch_op.f("fk_year_levels_school_id_schools"), type_="foreignkey")
         batch_op.create_unique_constraint("uq_year_levels_code", ["code"])
         batch_op.drop_column("stage")
         batch_op.drop_column("school_id")

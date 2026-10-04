@@ -8,6 +8,7 @@ them:
   * There is no state in which the knowledge tool is reachable but crippled. Either
     the turn ends before the agent runs, or the tool works.
 """
+
 import unittest
 from unittest.mock import patch
 
@@ -23,16 +24,24 @@ from backend.agent.chat.signals import (
     build_ladder,
 )
 from backend.agent.chat.turn_policy import TurnPlan, localized, resolve_turn
-from backend.agent.profiles.registry import load_profile
 from backend.agent.rag.evidence import Certainty
+from backend.profiles.registry import load_profile
 
 
 def agent_config(**overrides):
-    return load_profile("base").agent.model_copy(update=overrides) if overrides else load_profile("base").agent
+    return (
+        load_profile("base").agent.model_copy(update=overrides)
+        if overrides
+        else load_profile("base").agent
+    )
 
 
 def copy_config(**overrides):
-    return load_profile("base").user_copy.model_copy(update=overrides) if overrides else load_profile("base").user_copy
+    return (
+        load_profile("base").user_copy.model_copy(update=overrides)
+        if overrides
+        else load_profile("base").user_copy
+    )
 
 
 def ctx(question, history=(), config=None):
@@ -62,12 +71,14 @@ def _sets(scope, certainty):
     def mutate(signals):
         signals.scope = scope
         signals.scope_certainty = certainty
+
     return mutate
 
 
 # ---------------------------------------------------------------------------
 # Language
 # ---------------------------------------------------------------------------
+
 
 class LanguageTests(unittest.TestCase):
     def test_arabic_and_english_questions(self):
@@ -94,6 +105,7 @@ class LanguageTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Social lookup
 # ---------------------------------------------------------------------------
+
 
 class SocialDetectorTests(unittest.TestCase):
     def setUp(self):
@@ -142,9 +154,7 @@ class SocialDetectorTests(unittest.TestCase):
         config = agent_config(social_phrases=["thanks", "thanks for your help"])
         for text in ("thanks for your help, what are the fees", "thanks but what class"):
             self.assertIsNone(
-                self.detector.detect(
-                    ctx(text, config=config), RequestSignals(question=text)
-                ),
+                self.detector.detect(ctx(text, config=config), RequestSignals(question=text)),
                 text,
             )
 
@@ -165,6 +175,7 @@ class SocialDetectorTests(unittest.TestCase):
 # Corpus similarity
 # ---------------------------------------------------------------------------
 
+
 class Verdict:
     def __init__(self, in_domain, score=0.9, topics=(), abstained=False, reason="r"):
         self.in_domain = in_domain
@@ -177,9 +188,11 @@ class Verdict:
 class CorpusSimilarityTests(unittest.TestCase):
     def _detect(self, verdict, question="what is the uniform policy", history=()):
         signals = RequestSignals(question=question)
-        with patch("backend.indexing.embedding.embed_query", lambda _t: [0.1, 0.2]), \
-             patch("backend.agent.rag.domain_gate.classify", lambda *a, **k: verdict), \
-             patch("backend.agent.rag.domain_gate.reference_store"):
+        with (
+            patch("backend.indexing.embedding.embed_query", lambda _t: [0.1, 0.2]),
+            patch("backend.agent.rag.domain_gate.classify", lambda *a, **k: verdict),
+            patch("backend.agent.rag.domain_gate.reference_store"),
+        ):
             return CorpusSimilarityDetector().detect(ctx(question, history), signals)
 
     def test_a_match_admits_at_medium_certainty(self):
@@ -204,7 +217,7 @@ class CorpusSimilarityTests(unittest.TestCase):
             self.assertIsNone(CorpusSimilarityDetector().detect(ctx("q"), signals))
 
     def test_a_follow_up_is_scored_with_the_turn_before_it(self):
-        """"what about grade 6?" carries its subject in the previous turn."""
+        """ "what about grade 6?" carries its subject in the previous turn."""
         captured = {}
 
         def fake_embed(text):
@@ -213,9 +226,11 @@ class CorpusSimilarityTests(unittest.TestCase):
 
         signals = RequestSignals(question="what about grade 6")
         history = [user_message("what are the fees for grade 5")]
-        with patch("backend.indexing.embedding.embed_query", fake_embed), \
-             patch("backend.agent.rag.domain_gate.classify", lambda *a, **k: Verdict(True)), \
-             patch("backend.agent.rag.domain_gate.reference_store"):
+        with (
+            patch("backend.indexing.embedding.embed_query", fake_embed),
+            patch("backend.agent.rag.domain_gate.classify", lambda *a, **k: Verdict(True)),
+            patch("backend.agent.rag.domain_gate.reference_store"),
+        ):
             CorpusSimilarityDetector().detect(ctx("what about grade 6", history), signals)
 
         self.assertIn("grade 5", captured["text"])
@@ -228,9 +243,11 @@ class CorpusSimilarityTests(unittest.TestCase):
             captured["text"] = text
             return [0.1, 0.2]
 
-        with patch("backend.indexing.embedding.embed_query", fake_embed), \
-             patch("backend.agent.rag.domain_gate.classify", lambda *a, **k: Verdict(True)), \
-             patch("backend.agent.rag.domain_gate.reference_store"):
+        with (
+            patch("backend.indexing.embedding.embed_query", fake_embed),
+            patch("backend.agent.rag.domain_gate.classify", lambda *a, **k: Verdict(True)),
+            patch("backend.agent.rag.domain_gate.reference_store"),
+        ):
             CorpusSimilarityDetector().detect(ctx("what are the fees"), RequestSignals())
 
         self.assertEqual("what are the fees", captured["text"].strip())
@@ -239,6 +256,7 @@ class CorpusSimilarityTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Envelope
 # ---------------------------------------------------------------------------
+
 
 class EnvelopeTests(unittest.TestCase):
     def _detect(self, payload, signals=None):
@@ -252,8 +270,9 @@ class EnvelopeTests(unittest.TestCase):
 
     def test_it_can_rescue_a_false_rejection(self):
         """The override that lets the cheap rung be imperfect without being dangerous."""
-        prior = RequestSignals(question="q", scope=Scope.OUT_OF_DOMAIN,
-                               scope_certainty=Certainty.LOW)
+        prior = RequestSignals(
+            question="q", scope=Scope.OUT_OF_DOMAIN, scope_certainty=Certainty.LOW
+        )
         signals = self._detect({"scope": "in_domain"}, prior)
         self.assertIs(Scope.IN_DOMAIN, signals.scope)
         self.assertEqual(Certainty.HIGH, signals.scope_certainty)
@@ -279,6 +298,7 @@ class EnvelopeTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Ladder
 # ---------------------------------------------------------------------------
+
 
 class LadderTests(unittest.TestCase):
     def test_a_confident_admission_stops_the_climb(self):
@@ -341,6 +361,7 @@ class LadderTests(unittest.TestCase):
 # Turn policy
 # ---------------------------------------------------------------------------
 
+
 class TurnPolicyTests(unittest.TestCase):
     def _resolve(self, signals, **overrides):
         return resolve_turn(
@@ -355,47 +376,61 @@ class TurnPolicyTests(unittest.TestCase):
         self.assertIsNone(plan.exposed_tools, "None means bind everything the profile allows")
 
     def test_a_confirmed_out_of_domain_turn_ends_before_the_agent(self):
-        signals = RequestSignals(question="what is the weather", language=ENGLISH,
-                                 scope=Scope.OUT_OF_DOMAIN, scope_certainty=Certainty.HIGH)
+        signals = RequestSignals(
+            question="what is the weather",
+            language=ENGLISH,
+            scope=Scope.OUT_OF_DOMAIN,
+            scope_certainty=Certainty.HIGH,
+        )
         plan = self._resolve(signals)
         self.assertTrue(plan.short_circuit)
         self.assertEqual([], plan.exposed_tools)
         self.assertIn("outside what I can help with", plan.static_reply)
 
     def test_the_static_reply_follows_the_question_language(self):
-        signals = RequestSignals(question="ما هو الطقس اليوم", language=ARABIC,
-                                 scope=Scope.OUT_OF_DOMAIN, scope_certainty=Certainty.HIGH)
+        signals = RequestSignals(
+            question="ما هو الطقس اليوم",
+            language=ARABIC,
+            scope=Scope.OUT_OF_DOMAIN,
+            scope_certainty=Certainty.HIGH,
+        )
         self.assertIn("خارج نطاق", self._resolve(signals).static_reply)
 
     def test_a_tentative_rejection_never_ends_a_turn(self):
         """The whole safety argument: only something that read the question may refuse."""
-        signals = RequestSignals(question="q", scope=Scope.OUT_OF_DOMAIN,
-                                 scope_certainty=Certainty.LOW)
+        signals = RequestSignals(
+            question="q", scope=Scope.OUT_OF_DOMAIN, scope_certainty=Certainty.LOW
+        )
         plan = self._resolve(signals)
         self.assertFalse(plan.short_circuit)
         self.assertIsNone(plan.exposed_tools, "the knowledge tool stays bound AND working")
         self.assertIn("stays available", "; ".join(plan.reasons))
 
     def test_a_medium_rejection_also_never_ends_a_turn(self):
-        signals = RequestSignals(question="q", scope=Scope.OUT_OF_DOMAIN,
-                                 scope_certainty=Certainty.MEDIUM)
+        signals = RequestSignals(
+            question="q", scope=Scope.OUT_OF_DOMAIN, scope_certainty=Certainty.MEDIUM
+        )
         self.assertFalse(self._resolve(signals).short_circuit)
 
     def test_sections_are_a_hint_and_never_a_restriction(self):
         """There is no field here that can remove a document from reach."""
-        signals = RequestSignals(question="q", scope=Scope.IN_DOMAIN,
-                                 scope_certainty=Certainty.MEDIUM,
-                                 candidate_sections=["uniform", "fees"])
+        signals = RequestSignals(
+            question="q",
+            scope=Scope.IN_DOMAIN,
+            scope_certainty=Certainty.MEDIUM,
+            candidate_sections=["uniform", "fees"],
+        )
         plan = self._resolve(signals)
         self.assertEqual(["uniform", "fees"], plan.retrieval_sections)
         self.assertIsNone(plan.exposed_tools)
 
     def test_missing_copy_falls_through_to_the_agent(self):
         """Refusing with an empty string is worse than answering."""
-        from backend.agent.profiles.schema import LocalizedText
+        from backend.profiles.schema import LocalizedText
 
-        signals = RequestSignals(question="q", scope=Scope.OUT_OF_DOMAIN,
-                                 scope_certainty=Certainty.HIGH)
+        signals = RequestSignals(
+            question="q", scope=Scope.OUT_OF_DOMAIN, scope_certainty=Certainty.HIGH
+        )
         plan = self._resolve(signals, copy=copy_config(out_of_domain=LocalizedText()))
         self.assertFalse(plan.short_circuit)
         self.assertIsNone(plan.exposed_tools)
@@ -406,15 +441,21 @@ class TurnPolicyTests(unittest.TestCase):
         self.assertEqual([], plan.exposed_tools)
 
     def test_static_social_replies_are_opt_in(self):
-        plan = self._resolve(RequestSignals(question="thanks", is_social=True, language=ENGLISH),
-                             agent=agent_config(social_reply_mode="static"))
+        plan = self._resolve(
+            RequestSignals(question="thanks", is_social=True, language=ENGLISH),
+            agent=agent_config(social_reply_mode="static"),
+        )
         self.assertTrue(plan.short_circuit)
         self.assertIn("Happy to help", plan.static_reply)
 
     def test_profile_capture_is_independent_of_scope(self):
         """Someone can give their phone number inside an off-topic message."""
-        signals = RequestSignals(question="q", personal_data=["phone"],
-                                 scope=Scope.OUT_OF_DOMAIN, scope_certainty=Certainty.HIGH)
+        signals = RequestSignals(
+            question="q",
+            personal_data=["phone"],
+            scope=Scope.OUT_OF_DOMAIN,
+            scope_certainty=Certainty.HIGH,
+        )
         self.assertTrue(self._resolve(signals).capture_user_info)
 
     def test_the_plan_is_traceable(self):
@@ -425,20 +466,20 @@ class TurnPolicyTests(unittest.TestCase):
 
 class LocalizedTextTests(unittest.TestCase):
     def test_it_picks_the_requested_language(self):
-        from backend.agent.profiles.schema import LocalizedText
+        from backend.profiles.schema import LocalizedText
 
         text = LocalizedText(en="hello", ar="مرحبا")
         self.assertEqual("hello", localized(text, ENGLISH))
         self.assertEqual("مرحبا", localized(text, ARABIC))
 
     def test_a_missing_translation_falls_back_rather_than_blanking(self):
-        from backend.agent.profiles.schema import LocalizedText
+        from backend.profiles.schema import LocalizedText
 
         self.assertEqual("hello", localized(LocalizedText(en="hello"), ARABIC))
         self.assertEqual("مرحبا", localized(LocalizedText(ar="مرحبا"), ENGLISH))
 
     def test_empty_and_none_are_handled(self):
-        from backend.agent.profiles.schema import LocalizedText
+        from backend.profiles.schema import LocalizedText
 
         self.assertEqual("", localized(LocalizedText(), ENGLISH))
         self.assertEqual("", localized(None, ENGLISH))

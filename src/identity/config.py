@@ -33,6 +33,7 @@ A typo'd `IDENTITY_ACCESS_TTL_MINUTES=thirty` must not take authentication down 
 school; it should run with the documented default and say so in the log. The failure this
 avoids is a whole school losing sign-in because somebody edited an env file at 7am.
 """
+
 from __future__ import annotations
 
 import logging
@@ -41,7 +42,6 @@ from functools import lru_cache
 from typing import Final
 
 from identity.env import env_value, load_env
-
 from schoolauth import DEFAULT_AUDIENCE, DEFAULT_ISSUER
 
 logger = logging.getLogger(__name__)
@@ -272,9 +272,7 @@ def settings() -> Settings:
             "IDENTITY_REFRESH_REUSE_GRACE_SECONDS", _DEFAULT_REFRESH_REUSE_GRACE_SECONDS
         ),
         pbkdf2_rounds=_int_env("IDENTITY_PBKDF2_ROUNDS", _DEFAULT_PBKDF2_ROUNDS),
-        max_failed_attempts=_int_env(
-            "IDENTITY_MAX_FAILED_ATTEMPTS", _DEFAULT_MAX_FAILED_ATTEMPTS
-        ),
+        max_failed_attempts=_int_env("IDENTITY_MAX_FAILED_ATTEMPTS", _DEFAULT_MAX_FAILED_ATTEMPTS),
         lockout_minutes=_int_env("IDENTITY_LOCKOUT_MINUTES", _DEFAULT_LOCKOUT_MINUTES),
         bootstrap_admin_user=env_value("IDENTITY_BOOTSTRAP_ADMIN_USER"),
         bootstrap_admin_password=env_value("IDENTITY_BOOTSTRAP_ADMIN_PASSWORD"),

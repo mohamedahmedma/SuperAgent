@@ -4,6 +4,7 @@
 there is none, which is every CI run. These cover the same stores in a throwaway schema,
 so the repository behind them is exercised wherever the suite runs.
 """
+
 import unittest
 
 from backend.application.ports.repositories import DigestRecord
@@ -40,7 +41,9 @@ class SectionCatalogueTests(unittest.TestCase):
 
     def test_a_record_round_trips_with_its_vectors_exact(self):
         precise = [0.1234567890123456, -0.9876543210987654, 1e-8]
-        self.catalogue.save_records("school", [record("s1", ("q one?", "q two?"), [precise, [0.5]])])
+        self.catalogue.save_records(
+            "school", [record("s1", ("q one?", "q two?"), [precise, [0.5]])]
+        )
 
         [loaded] = self.catalogue.load_records("school")
         self.assertEqual(["q one?", "q two?"], loaded.answers)
@@ -61,26 +64,44 @@ class SectionCatalogueTests(unittest.TestCase):
         self.assertEqual(["from second?"], self.catalogue.load_records("second")[0].answers)
 
     def test_hashes_and_deleting_what_the_corpus_no_longer_has(self):
-        self.catalogue.save_records("school", [record("s1", sha="a"), record("s2", sha="b"), record("s3", sha="c")])
+        self.catalogue.save_records(
+            "school", [record("s1", sha="a"), record("s2", sha="b"), record("s3", sha="c")]
+        )
         self.catalogue.save_records("other", [record("s2")])
 
-        self.assertEqual({"s1": "a", "s2": "b", "s3": "c"}, self.catalogue.existing_hashes("school"))
+        self.assertEqual(
+            {"s1": "a", "s2": "b", "s3": "c"}, self.catalogue.existing_hashes("school")
+        )
         self.assertEqual(1, self.catalogue.delete_missing("school", ["s1", "s3"]))
         self.assertEqual({"s1", "s3"}, {r.chunk_id for r in self.catalogue.load_records("school")})
-        self.assertEqual(1, len(self.catalogue.load_records("other")), "another profile lost a section")
+        self.assertEqual(
+            1, len(self.catalogue.load_records("other")), "another profile lost a section"
+        )
 
     def test_an_empty_save_writes_nothing(self):
         self.assertEqual(0, self.catalogue.save_records("school", []))
         self.assertEqual([], self.catalogue.load_records("school"))
 
     def test_a_digest_round_trips_and_a_second_save_updates_it(self):
-        self.assertTrue(self.catalogue.save_digest("school", DigestRecord(paragraph="first", floor=0.1)))
-        self.assertTrue(self.catalogue.save_digest("school", DigestRecord(
-            paragraph="second", sections_sha256="abc", section_count=3, floor=0.5770054,
-        )))
+        self.assertTrue(
+            self.catalogue.save_digest("school", DigestRecord(paragraph="first", floor=0.1))
+        )
+        self.assertTrue(
+            self.catalogue.save_digest(
+                "school",
+                DigestRecord(
+                    paragraph="second",
+                    sections_sha256="abc",
+                    section_count=3,
+                    floor=0.5770054,
+                ),
+            )
+        )
 
         digest = self.catalogue.load_digest("school")
-        self.assertEqual(("second", "abc", 3), (digest.paragraph, digest.sections_sha256, digest.section_count))
+        self.assertEqual(
+            ("second", "abc", 3), (digest.paragraph, digest.sections_sha256, digest.section_count)
+        )
         self.assertAlmostEqual(0.5770054, digest.floor, places=6)
 
     def test_an_absent_digest_reads_as_empty(self):
@@ -118,16 +139,26 @@ class ParentChunkStoreTests(unittest.TestCase):
 
     @staticmethod
     def chunk(chunk_id, *, filename="fees.pdf", idx=0, level=1, text="Fees.", **extra):
-        return {"chunk_id": chunk_id, "filename": filename, "chunk_idx": idx, "chunk_level": level,
-                "text": text, **extra}
+        return {
+            "chunk_id": chunk_id,
+            "filename": filename,
+            "chunk_idx": idx,
+            "chunk_level": level,
+            "text": text,
+            **extra,
+        }
 
     def test_writing_a_chunk_again_updates_it(self):
         self.store.upsert_documents([self.chunk("c1", text="old")])
-        self.store.upsert_documents([self.chunk("c1", text="new", modality="figure", asset_ids=["a1"])])
+        self.store.upsert_documents(
+            [self.chunk("c1", text="new", modality="figure", asset_ids=["a1"])]
+        )
         self.cache.store.clear()
 
         [doc] = self.store.get_documents_by_ids(["c1"])
-        self.assertEqual(("new", "figure", ["a1"]), (doc["text"], doc["modality"], doc["asset_ids"]))
+        self.assertEqual(
+            ("new", "figure", ["a1"]), (doc["text"], doc["modality"], doc["asset_ids"])
+        )
 
     def test_a_repeated_id_in_one_write_keeps_the_last(self):
         self.store.upsert_documents([self.chunk("c1", text="first"), self.chunk("c1", text="last")])
@@ -150,26 +181,36 @@ class ParentChunkStoreTests(unittest.TestCase):
         self.assertEqual(["c1"], [doc["chunk_id"] for doc in warm.get_documents_by_ids(["c1"])])
 
     def test_deleting_a_document_removes_its_chunks_and_their_cache_entries(self):
-        self.store.upsert_documents([
-            self.chunk("c1"), self.chunk("c2", idx=1), self.chunk("c3", filename="bus.pdf"),
-        ])
+        self.store.upsert_documents(
+            [
+                self.chunk("c1"),
+                self.chunk("c2", idx=1),
+                self.chunk("c3", filename="bus.pdf"),
+            ]
+        )
 
         self.assertEqual(2, self.store.delete_by_filename("fees.pdf"))
         self.assertNotIn("parent_chunk:c1", self.cache.store)
         self.cache.store.clear()
-        self.assertEqual(["c3"], [d["chunk_id"] for d in self.store.get_documents_by_ids(["c1", "c2", "c3"])])
+        self.assertEqual(
+            ["c3"], [d["chunk_id"] for d in self.store.get_documents_by_ids(["c1", "c2", "c3"])]
+        )
 
     def test_sections_are_one_level_in_file_and_position_order(self):
-        self.store.upsert_documents([
-            self.chunk("b1", filename="b.pdf", idx=1),
-            self.chunk("a2", filename="a.pdf", idx=2),
-            self.chunk("a1", filename="a.pdf", idx=1),
-            self.chunk("a0", filename="a.pdf", idx=0, level=2),
-        ])
+        self.store.upsert_documents(
+            [
+                self.chunk("b1", filename="b.pdf", idx=1),
+                self.chunk("a2", filename="a.pdf", idx=2),
+                self.chunk("a1", filename="a.pdf", idx=1),
+                self.chunk("a0", filename="a.pdf", idx=0, level=2),
+            ]
+        )
         self.assertEqual(["a1", "a2", "b1"], [chunk.chunk_id for chunk in self.store.sections(1)])
 
     def test_a_large_document_is_written_across_batches(self):
-        self.assertEqual(1201, self.store.upsert_documents([self.chunk(f"c{i}", idx=i) for i in range(1201)]))
+        self.assertEqual(
+            1201, self.store.upsert_documents([self.chunk(f"c{i}", idx=i) for i in range(1201)])
+        )
         self.cache.store.clear()
         ids = [f"c{i}" for i in range(1201)]
         self.assertEqual(1201, len(self.store.get_documents_by_ids(ids)))

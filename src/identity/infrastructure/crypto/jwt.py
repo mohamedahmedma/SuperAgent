@@ -7,6 +7,7 @@ What goes *into* a token is `domain/claims.py`'s decision, not this file's. What
 is the signing, the opaque refresh token, and the one decode this service does of its own
 tokens.
 """
+
 from __future__ import annotations
 
 import hashlib

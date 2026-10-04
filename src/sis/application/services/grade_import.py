@@ -22,6 +22,7 @@ Ports only. No sqlalchemy, no fastapi, no `sis.config`: the clock, the id genera
 TTL and the size limit are all injected, so every rule below is testable with fake
 repositories, a literal `b"..."` and a fixed `datetime`.
 """
+
 import hashlib
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -37,6 +38,7 @@ from sis.application.dto import (
     ParsedGradeRow,
     RowCode,
 )
+
 # `RowOutcome` names two different things: a per-row diagnostic DTO and the domain enum of
 # fates. Both are needed here, so the DTO is aliased. Importing either unaliased is how a
 # row's `code` ends up holding "rejected" and its outcome holding a `RowCode`.
@@ -201,14 +203,16 @@ class GradeImportService:
             # common single-term upload. Applied here so the batch payload records the
             # term explicitly and commit never has to re-derive it from a command it no
             # longer has.
-            resolved = row if row.term_code is not None else replace(
-                row, term_code=command.term_code
+            resolved = (
+                row if row.term_code is not None else replace(row, term_code=command.term_code)
             )
-            requests.append(_Request(
-                row=resolved,
-                expected_class=command.class_code,
-                expected_year_level=command.year_level_code,
-            ))
+            requests.append(
+                _Request(
+                    row=resolved,
+                    expected_class=command.class_code,
+                    expected_year_level=command.year_level_code,
+                )
+            )
 
         with self._uow_factory() as uow:
             assessments.extend(self._assess(uow, requests))
@@ -273,9 +277,7 @@ class GradeImportService:
 
             assessments = [
                 self._as_changed_if_failed(before, after)
-                for before, after in zip(
-                    previewed, self._assess(uow, requests), strict=True
-                )
+                for before, after in zip(previewed, self._assess(uow, requests), strict=True)
             ]
             written = self._write(uow, assessments)
             final = carried + written
@@ -290,9 +292,7 @@ class GradeImportService:
 
     # -- Validation core ---------------------------------------------------
 
-    def _assess(
-        self, uow: UnitOfWork, requests: Sequence[_Request]
-    ) -> list[_Assessment]:
+    def _assess(self, uow: UnitOfWork, requests: Sequence[_Request]) -> list[_Assessment]:
         """Validate every row in bulk: three lookups for the file, not three per row.
 
         A per-row `get` here is what turns a 600-mark upload into two thousand queries and
@@ -364,20 +364,31 @@ class GradeImportService:
         term = terms.get(str(row.term_code)) if row.term_code is not None else None
         if term is None:
             return _Assessment(
-                line, payload, RowCode.UNKNOWN_TERM, RowOutcome.REJECTED,
-                f"no term {row.term_code}", "term_code",
+                line,
+                payload,
+                RowCode.UNKNOWN_TERM,
+                RowOutcome.REJECTED,
+                f"no term {row.term_code}",
+                "term_code",
             )
         if str(row.student_number) not in students:
             return _Assessment(
-                line, payload, RowCode.UNKNOWN_STUDENT, RowOutcome.REJECTED,
-                f"no student {row.student_number} on file", "student_number",
+                line,
+                payload,
+                RowCode.UNKNOWN_STUDENT,
+                RowOutcome.REJECTED,
+                f"no student {row.student_number} on file",
+                "student_number",
             )
         # Under the term's year, not globally: a subject the school teaches this year is
         # not on file for last year's marks, and reporting it as present would write a
         # grade against a subject that year never taught.
         if (str(term.academic_year_code), str(row.subject_code)) not in subjects:
             return _Assessment(
-                line, payload, RowCode.UNKNOWN_SUBJECT, RowOutcome.REJECTED,
+                line,
+                payload,
+                RowCode.UNKNOWN_SUBJECT,
+                RowOutcome.REJECTED,
                 f"no subject {row.subject_code} in {term.academic_year_code}",
                 "subject_code",
             )
@@ -390,7 +401,10 @@ class GradeImportService:
             # the spreadsheet, and silently keeping whichever sorted last means the file
             # decides which is right instead of the registrar.
             return _Assessment(
-                line, payload, RowCode.DUPLICATE_IN_FILE, RowOutcome.REJECTED,
+                line,
+                payload,
+                RowCode.DUPLICATE_IN_FILE,
+                RowOutcome.REJECTED,
                 f"line {first} already states {row.subject_code} for "
                 f"{row.student_number} in {row.term_code}",
                 "student_number",
@@ -402,19 +416,23 @@ class GradeImportService:
         section = sections.get((str(row.term_code), str(row.student_number)))
         if section is None:
             return _Assessment(
-                line, payload, RowCode.UNKNOWN_CLASS, RowOutcome.REJECTED,
+                line,
+                payload,
+                RowCode.UNKNOWN_CLASS,
+                RowOutcome.REJECTED,
                 f"{row.student_number} had no class placement covering {row.term_code}; "
                 "a mark cannot be filed under a guessed class",
                 "class_code",
             )
-        if request.expected_class is not None and str(section.code) != str(
-            request.expected_class
-        ):
+        if request.expected_class is not None and str(section.code) != str(request.expected_class):
             # The guard `GradePreviewCommand.class_code` exists for: a file uploaded
             # against the wrong class must be refused, not matched against the whole
             # school.
             return _Assessment(
-                line, payload, RowCode.UNKNOWN_CLASS, RowOutcome.REJECTED,
+                line,
+                payload,
+                RowCode.UNKNOWN_CLASS,
+                RowOutcome.REJECTED,
                 f"{row.student_number} was in {section.code} for {row.term_code}, not "
                 f"{request.expected_class}",
                 "class_code",
@@ -423,7 +441,10 @@ class GradeImportService:
             request.expected_year_level
         ):
             return _Assessment(
-                line, payload, RowCode.UNKNOWN_CLASS, RowOutcome.REJECTED,
+                line,
+                payload,
+                RowCode.UNKNOWN_CLASS,
+                RowOutcome.REJECTED,
                 f"{row.student_number} was in grade {section.year_level_code} for "
                 f"{row.term_code}, not {request.expected_year_level}",
                 "year_level_code",
@@ -431,7 +452,10 @@ class GradeImportService:
         section_id = section_ids.get(section.identity)
         if section_id is None:
             return _Assessment(
-                line, payload, RowCode.UNKNOWN_CLASS, RowOutcome.REJECTED,
+                line,
+                payload,
+                RowCode.UNKNOWN_CLASS,
+                RowOutcome.REJECTED,
                 f"class {section.code} could not be resolved for {row.term_code}",
                 "class_code",
             )
@@ -447,7 +471,10 @@ class GradeImportService:
             # stays an explicit, single-grade act.
             if on_file is not None and on_file.is_graded:
                 return _Assessment(
-                    line, payload, RowCode.OK, RowOutcome.UNCHANGED,
+                    line,
+                    payload,
+                    RowCode.OK,
+                    RowOutcome.UNCHANGED,
                     "blank cell left the mark already on file untouched",
                 )
         try:
@@ -457,21 +484,33 @@ class GradeImportService:
             # 140. Its own code because it is a conversation about the grading scale, not
             # a mistyped cell.
             return _Assessment(
-                line, payload, RowCode.GRADE_OUT_OF_RANGE, RowOutcome.REJECTED,
-                error.message, error.field,
+                line,
+                payload,
+                RowCode.GRADE_OUT_OF_RANGE,
+                RowOutcome.REJECTED,
+                error.message,
+                error.field,
             )
         except SisError as error:
             return _Assessment(
-                line, payload, RowCode.INVALID_GRADE, RowOutcome.REJECTED,
-                error.message, error.field,
+                line,
+                payload,
+                RowCode.INVALID_GRADE,
+                RowOutcome.REJECTED,
+                error.message,
+                error.field,
             )
 
         if on_file is None:
             return _Assessment(line, payload, RowCode.OK, RowOutcome.CREATED, grade=grade)
         if self._same_figure(on_file, grade):
             return _Assessment(
-                line, payload, RowCode.OK, RowOutcome.UNCHANGED,
-                "already on file with the same figure", grade=grade,
+                line,
+                payload,
+                RowCode.OK,
+                RowOutcome.UNCHANGED,
+                "already on file with the same figure",
+                grade=grade,
             )
         # Restating a mark is the normal reason to upload a corrected sheet, so an existing
         # grade is an update and never `DUPLICATE_EXISTING`. That code belongs to imports
@@ -481,18 +520,14 @@ class GradeImportService:
 
     # -- Writing -----------------------------------------------------------
 
-    def _write(
-        self, uow: UnitOfWork, assessments: Sequence[_Assessment]
-    ) -> list[_Assessment]:
+    def _write(self, uow: UnitOfWork, assessments: Sequence[_Assessment]) -> list[_Assessment]:
         """Upsert every writable grade in one statement and report what each row became.
 
         The repository's created/updated flag wins over the preview's guess: another
         registrar may have entered the same mark in between, and reporting "created" for a
         row that updated is a small lie that makes an audit trail unusable.
         """
-        writable = [
-            a for a in assessments if a.grade is not None and a.outcome in _WRITES
-        ]
+        writable = [a for a in assessments if a.grade is not None and a.outcome in _WRITES]
         if not writable:
             return list(assessments)
         created = uow.grades.upsert_many([a.grade for a in writable])  # type: ignore[misc]
@@ -572,9 +607,7 @@ class GradeImportService:
             term = terms.get(str(request.row.term_code))
             if term is None or request.row.subject_code is None:
                 continue
-            wanted.setdefault(str(term.academic_year_code), set()).add(
-                request.row.subject_code
-            )
+            wanted.setdefault(str(term.academic_year_code), set()).add(request.row.subject_code)
 
         resolved: dict[tuple[str, str], Subject] = {}
         for year_code, codes in wanted.items():
@@ -658,15 +691,11 @@ class GradeImportService:
                 percentage=None if percentage is None else Percentage(float(percentage)),  # type: ignore[arg-type]
                 points=None if payload.get("points") is None else float(payload["points"]),  # type: ignore[arg-type]
                 max_points=(
-                    None
-                    if payload.get("max_points") is None
-                    else float(payload["max_points"])  # type: ignore[arg-type]
+                    None if payload.get("max_points") is None else float(payload["max_points"])  # type: ignore[arg-type]
                 ),
             ),
             expected_class=(
-                ClassCode(str(payload["class_code"]))
-                if payload.get("class_code")
-                else None
+                ClassCode(str(payload["class_code"])) if payload.get("class_code") else None
             ),
         )
 

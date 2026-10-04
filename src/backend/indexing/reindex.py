@@ -27,6 +27,7 @@ dossier_version) and a reindex changes none of those, so no vision calls are spe
 
 Exit codes: 0 every document rebuilt, 1 at least one failed, 2 nothing to do.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -123,11 +124,13 @@ def main(argv: Optional[list] = None) -> int:
     if args.all:
         try:
             services.milvus.init_collection()
-            filenames = sorted({
-                str(item.get("filename"))
-                for item in services.milvus.query(output_fields=["filename"])
-                if item.get("filename")
-            })
+            filenames = sorted(
+                {
+                    str(item.get("filename"))
+                    for item in services.milvus.query(output_fields=["filename"])
+                    if item.get("filename")
+                }
+            )
         except Exception as exc:  # noqa: BLE001 — the message matters more than the type
             print(f"!! could not list indexed documents: {exc}")
             return 1

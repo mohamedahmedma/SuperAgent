@@ -9,18 +9,11 @@ Two properties carry the safety of this subsystem:
 
 Most of these tests exist to pin those.
 """
+
 import unittest
 from unittest.mock import patch
 
 from backend.agent.chat.signals import RequestSignals, Scope, SignalContext
-from backend.indexing.section_summary import (
-    SectionRecord,
-    content_hash,
-    corpus_catalogue,
-    plan_sections,
-    summarise_section,
-)
-from backend.agent.profiles.registry import load_profile
 from backend.agent.rag.evidence import Certainty
 from backend.agent.rag.scope_detector import (
     CatalogueScopeDetector,
@@ -28,6 +21,14 @@ from backend.agent.rag.scope_detector import (
     ScopeModelDetector,
 )
 from backend.agent.rag.scope_index import ScopeIndex, build_index, derive_floor, percentile
+from backend.indexing.section_summary import (
+    SectionRecord,
+    content_hash,
+    corpus_catalogue,
+    plan_sections,
+    summarise_section,
+)
+from backend.profiles.registry import load_profile
 
 VOCABULARY = ["admissions", "fees", "uniform", "transport"]
 
@@ -83,31 +84,41 @@ class SummariseTests(unittest.TestCase):
         )
 
     def test_a_usable_entry_is_returned(self):
-        result = self._summarise({
-            "summary": "About the uniform.",
-            "answers": ["what is the uniform?", "where do I buy it?"],
-            "topics": ["uniform"],
-        })
+        result = self._summarise(
+            {
+                "summary": "About the uniform.",
+                "answers": ["what is the uniform?", "where do I buy it?"],
+                "topics": ["uniform"],
+            }
+        )
         self.assertEqual(2, len(result["answers"]))
         self.assertEqual(["uniform"], result["topics"])
 
     def test_invented_topics_are_discarded(self):
         """The vocabulary is frozen so the catalogue cannot drift between re-indexes."""
-        result = self._summarise({
-            "summary": "s", "answers": ["what is it?"], "topics": ["uniform", "quantum_physics"],
-        })
+        result = self._summarise(
+            {
+                "summary": "s",
+                "answers": ["what is it?"],
+                "topics": ["uniform", "quantum_physics"],
+            }
+        )
         self.assertEqual(["uniform"], result["topics"])
 
     def test_topic_matching_ignores_case_and_spacing(self):
-        result = self._summarise({"summary": "s", "answers": ["what is it?"], "topics": [" Uniform "]})
+        result = self._summarise(
+            {"summary": "s", "answers": ["what is it?"], "topics": [" Uniform "]}
+        )
         self.assertEqual(["uniform"], result["topics"])
 
     def test_near_duplicate_questions_collapse(self):
         """Each question costs a vector and near-duplicates add no coverage."""
-        result = self._summarise({
-            "summary": "s",
-            "answers": ["What is the uniform?", "what is the uniform", "Where to buy?"],
-        })
+        result = self._summarise(
+            {
+                "summary": "s",
+                "answers": ["What is the uniform?", "what is the uniform", "Where to buy?"],
+            }
+        )
         self.assertEqual(2, len(result["answers"]))
 
     def test_a_section_with_no_questions_is_skipped_not_guessed(self):
@@ -119,9 +130,7 @@ class SummariseTests(unittest.TestCase):
         def boom(*a):
             raise RuntimeError("model down")
 
-        self.assertIsNone(
-            summarise_section("text", invoke=boom, vocabulary=VOCABULARY)
-        )
+        self.assertIsNone(summarise_section("text", invoke=boom, vocabulary=VOCABULARY))
 
     def test_the_question_count_is_bounded(self):
         result = self._summarise(
@@ -168,17 +177,23 @@ class DerivedFloorTests(unittest.TestCase):
 
 class BuildIndexTests(unittest.TestCase):
     def _build(self, records, **kwargs):
-        lookup = {"what is the uniform?": unit(0), "where do I buy it?": unit(1),
-                  "what are the fees?": unit(2), "when is term?": unit(3)}
+        lookup = {
+            "what is the uniform?": unit(0),
+            "where do I buy it?": unit(1),
+            "what are the fees?": unit(2),
+            "when is term?": unit(3),
+        }
         return build_index(records, embed=lambda qs: [lookup[q] for q in qs], **kwargs)
 
     def test_one_vector_per_question_not_per_section(self):
         """Averaging a section's questions into one vector puts the centroid near none
         of them."""
-        index = self._build([
-            record("s1", ["what is the uniform?", "where do I buy it?"]),
-            record("s2", ["what are the fees?"], topics=["fees"]),
-        ])
+        index = self._build(
+            [
+                record("s1", ["what is the uniform?", "where do I buy it?"]),
+                record("s2", ["what are the fees?"], topics=["fees"]),
+            ]
+        )
         self.assertEqual(3, len(index.vectors))
         self.assertEqual(2, len(set(index.chunk_ids)))
 
@@ -194,8 +209,9 @@ class BuildIndexTests(unittest.TestCase):
     def test_a_mismatched_embedder_abstains_rather_than_misaligning(self):
         """Vectors and questions are positionally paired; a length mismatch would map
         every score to the wrong question."""
-        index = build_index([record("s1", ["what is it?", "how much?"])],
-                            embed=lambda qs: [unit(0)])
+        index = build_index(
+            [record("s1", ["what is it?", "how much?"])], embed=lambda qs: [unit(0)]
+        )
         self.assertFalse(index.ready)
 
     def test_dimension_mismatches_are_skipped_not_scored(self):
@@ -252,8 +268,7 @@ class CatalogueRungTests(unittest.TestCase):
         offered, so the choice is made once by them instead of guessed at by a rewrite."""
         between = [0.7071, 0.7071, 0.0, 0.0]  # ~0.71 against both, floor 0.5
         signals = self._detect(self._index(floor=0.5), between)
-        self.assertEqual(
-            ["what is the uniform?", "what are the fees?"], signals.scope_options)
+        self.assertEqual(["what is the uniform?", "what are the fees?"], signals.scope_options)
 
     def test_a_decisive_query_offers_only_the_question_it_matched(self):
         """One direction is not a choice, and routing treats it as none."""
@@ -351,8 +366,9 @@ class ScopeModelRungTests(unittest.TestCase):
         self.assertEqual(Certainty.HIGH, signals.scope_certainty)
 
     def test_it_rescues_a_tentative_rejection(self):
-        prior = RequestSignals(question="q", scope=Scope.OUT_OF_DOMAIN,
-                               scope_certainty=Certainty.LOW)
+        prior = RequestSignals(
+            question="q", scope=Scope.OUT_OF_DOMAIN, scope_certainty=Certainty.LOW
+        )
         signals = self._detect({"scope": "in_domain"}, prior)
         self.assertIs(Scope.IN_DOMAIN, signals.scope)
 
@@ -375,26 +391,35 @@ class LadderCompositionTests(unittest.TestCase):
     def test_the_catalogue_supersedes_the_chunk_gate(self):
         from backend.agent.chat.signals import build_ladder
 
-        names = [d.name for d in build_ladder(
-            config(scope_index_enabled=True, domain_gate_enabled=True)
-        )._detectors]
+        names = [
+            d.name
+            for d in build_ladder(
+                config(scope_index_enabled=True, domain_gate_enabled=True)
+            )._detectors
+        ]
         self.assertIn("scope_catalogue", names)
         self.assertNotIn("corpus_similarity", names)
 
     def test_the_chunk_gate_remains_for_deployments_without_a_catalogue(self):
         from backend.agent.chat.signals import build_ladder
 
-        names = [d.name for d in build_ladder(
-            config(scope_index_enabled=False, domain_gate_enabled=True)
-        )._detectors]
+        names = [
+            d.name
+            for d in build_ladder(
+                config(scope_index_enabled=False, domain_gate_enabled=True)
+            )._detectors
+        ]
         self.assertIn("corpus_similarity", names)
 
     def test_the_scope_model_needs_both_switches(self):
         from backend.agent.chat.signals import build_ladder
 
-        names = [d.name for d in build_ladder(
-            config(scope_index_enabled=True, request_envelope_enabled=False)
-        )._detectors]
+        names = [
+            d.name
+            for d in build_ladder(
+                config(scope_index_enabled=True, request_envelope_enabled=False)
+            )._detectors
+        ]
         self.assertNotIn("scope_model", names)
 
 
@@ -407,7 +432,9 @@ class StoreTests(unittest.TestCase):
             raise RuntimeError("db down")
 
         store = ScopeIndexStore(builder=explode)
-        store.get(); store.get(); store.get()
+        store.get()
+        store.get()
+        store.get()
         self.assertEqual(1, len(calls))
         self.assertFalse(store.get().ready)
 
@@ -419,7 +446,8 @@ class StoreTests(unittest.TestCase):
             return ScopeIndex(questions=["q"], vectors=[unit(0)], chunk_ids=["s1"], topics=[[]])
 
         store = ScopeIndexStore(builder=builder)
-        store.get(); store.get()
+        store.get()
+        store.get()
         self.assertEqual(1, len(calls))
         store.invalidate()
         store.get()
@@ -428,8 +456,10 @@ class StoreTests(unittest.TestCase):
 
 class CatalogueTests(unittest.TestCase):
     def test_topics_are_deduped_in_order(self):
-        records = [record("s1", ["what is it?"], ["uniform"]),
-                   record("s2", ["how much is it?"], ["fees", "uniform"])]
+        records = [
+            record("s1", ["what is it?"], ["uniform"]),
+            record("s2", ["how much is it?"], ["fees", "uniform"]),
+        ]
         self.assertEqual("uniform, fees", corpus_catalogue(records))
 
     def test_a_record_without_questions_is_unusable(self):
@@ -490,7 +520,9 @@ class CompletenessTests(unittest.TestCase):
         """Positional pairing means a short list would misalign questions with other
         questions' vectors."""
         partial = SectionRecord(
-            chunk_id="s2", answers=["a?", "b?"], question_vectors=[unit(0)],
+            chunk_id="s2",
+            answers=["a?", "b?"],
+            question_vectors=[unit(0)],
         )
         self.assertFalse(self._verify([partial], expected=1)["complete"])
 
@@ -500,8 +532,9 @@ class VectorReuseTests(unittest.TestCase):
         def never(questions):
             raise AssertionError(f"re-embedded {len(questions)} question(s)")
 
-        records = [SectionRecord(chunk_id="s1", answers=["a?", "b?"],
-                                 question_vectors=[unit(0), unit(1)])]
+        records = [
+            SectionRecord(chunk_id="s1", answers=["a?", "b?"], question_vectors=[unit(0), unit(1)])
+        ]
         index = build_index(records, embed=never)
         self.assertEqual(2, len(index.vectors))
 
@@ -528,7 +561,6 @@ class VectorReuseTests(unittest.TestCase):
             seen.extend(questions)
             return [unit(3) for _ in questions]
 
-        records = [SectionRecord(chunk_id="s1", answers=["a?", "b?"],
-                                 question_vectors=[unit(0)])]
+        records = [SectionRecord(chunk_id="s1", answers=["a?", "b?"], question_vectors=[unit(0)])]
         build_index(records, embed=embed)
         self.assertEqual(["a?", "b?"], seen)

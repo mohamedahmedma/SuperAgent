@@ -8,6 +8,7 @@ every later comparison against it silently answers "no".
 
 Framework-free, like the module under test: no fixtures, no database, no clock.
 """
+
 import math
 
 import pytest
@@ -27,7 +28,6 @@ from sis.domain.value_objects import (
     TermCode,
     YearCode,
 )
-
 
 # --------------------------------------------------------------------------- Percentage
 
@@ -160,9 +160,7 @@ EG = "+20"
         ("+966501234567", "+966501234567"),
     ],
 )
-def test_every_spelling_of_one_number_collapses_to_one_value(
-    raw: str, expected: str
-) -> None:
+def test_every_spelling_of_one_number_collapses_to_one_value(raw: str, expected: str) -> None:
     """The deduplication the guardian importer rests on.
 
     These are all the same woman. If two of them failed to collide she would become two

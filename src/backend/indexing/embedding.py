@@ -34,6 +34,7 @@ anything that transitively imports it, which is most of the backend — therefor
 ~110 s and 2 GB even in a process that would never embed anything, including one
 configured to use a remote backend. It loads on first use instead.
 """
+
 import logging
 import os
 import random
@@ -99,7 +100,7 @@ class _RemoteEmbedder:
         self._session = None
         self._session_lock = threading.Lock()
         # The embedding provider's own quota, separate from the chat models' (item 37).
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
         from backend.provider_quota import ProviderGate
 
         rag = get_profile().rag
@@ -248,9 +249,15 @@ def _connection_retry():
     from urllib3.util.retry import Retry
 
     return Retry(
-        total=2, connect=2, read=2, status=0, other=0, redirect=0,
+        total=2,
+        connect=2,
+        read=2,
+        status=0,
+        other=0,
+        redirect=0,
         allowed_methods=None,  # POST included: see above
-        backoff_factor=0, raise_on_status=False,
+        backoff_factor=0,
+        raise_on_status=False,
     )
 
 
@@ -382,9 +389,7 @@ class CoalescingEmbedder:
         try:
             vectors = self._inner.embed_documents([item.text for item in batch])
             if len(vectors) != len(batch):
-                raise ValueError(
-                    f"embedder returned {len(vectors)} vectors for {len(batch)} texts"
-                )
+                raise ValueError(f"embedder returned {len(vectors)} vectors for {len(batch)} texts")
             for item, vector in zip(batch, vectors):
                 item.vector = vector
         except BaseException as exc:

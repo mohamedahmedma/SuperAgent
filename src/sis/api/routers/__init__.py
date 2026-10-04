@@ -1,4 +1,4 @@
-﻿"""HTTP routers: the only place FastAPI and pydantic appear, and the thinnest layer here.
+"""HTTP routers: the only place FastAPI and pydantic appear, and the thinnest layer here.
 
 A router does three things and nothing else â€” turn a request into a DTO or a domain
 value, call one service method, render the answer. It holds no rule and it imports no
@@ -21,6 +21,7 @@ added next year inherits its parent's status instead of falling through to a 500
 importable *from* a router module without a circular import, which is what lets the
 routers share `ErrorOut` and `domain_errors` from here at all.
 """
+
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Final
@@ -98,9 +99,7 @@ def domain_errors() -> Iterator[None]:
     try:
         yield
     except SisError as error:
-        raise HTTPException(
-            status_code=status_for(error), detail=error.as_dict()
-        ) from error
+        raise HTTPException(status_code=status_for(error), detail=error.as_dict()) from error
 
 
 def error_responses(*codes: int) -> dict[int | str, dict[str, object]]:
@@ -120,8 +119,8 @@ def all_routers() -> tuple["APIRouter", ...]:
     composition root in `sis/app.py` stays the only thing that knows an app exists.
     """
     from sis.api.routers import (
-        admin,
         access,
+        admin,
         attendance,
         chat,
         classroom,
@@ -136,9 +135,9 @@ def all_routers() -> tuple["APIRouter", ...]:
         student_documents,
         students,
         system,
-        timetable,
         teachers,
         teaching,
+        timetable,
     )
 
     # An explicit tuple, not discovery over the package. A new module that nobody adds

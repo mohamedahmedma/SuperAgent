@@ -3,6 +3,7 @@
 Being the default matters: an unconfigured deployment tells every parent they have no
 children on file, rather than authorising them against nothing.
 """
+
 from __future__ import annotations
 
 from records.domain.errors import GuardianDirectoryUnavailable

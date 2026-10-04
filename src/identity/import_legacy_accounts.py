@@ -22,6 +22,7 @@ concept of a guardian, so there is nothing to carry over, and inventing a bindin
 during a bulk import is precisely the mistake that would hand one family's records to
 another. Bindings are a separate, deliberate, admin-only act.
 """
+
 import argparse
 import sys
 
@@ -81,8 +82,12 @@ def import_accounts(source_url: str, *, dry_run: bool = False) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", required=True, help="SQLAlchemy URL of the old backend database.")
-    parser.add_argument("--dry-run", action="store_true", help="Report what would happen, write nothing.")
+    parser.add_argument(
+        "--source", required=True, help="SQLAlchemy URL of the old backend database."
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Report what would happen, write nothing."
+    )
     args = parser.parse_args()
 
     init_db()

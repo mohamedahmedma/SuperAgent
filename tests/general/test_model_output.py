@@ -5,6 +5,7 @@ Every LEAK_* constant below is a real `content` string captured from
 verbatim on purpose: the three leak shapes differ in ways that a hand-written sample
 would smooth over, and the third one is the reason `Finalizer` exists at all.
 """
+
 import unittest
 
 from langchain_core.messages import AIMessageChunk
@@ -72,9 +73,7 @@ class HarmonyStripTests(unittest.TestCase):
 
     def test_a_body_with_no_channel_named_is_kept(self):
         """Permissive by design: suppressing a real answer is the worse failure."""
-        self.assertEqual(
-            strip_harmony("<|start|>assistant<|message|>مرحبا<|return|>"), "مرحبا"
-        )
+        self.assertEqual(strip_harmony("<|start|>assistant<|message|>مرحبا<|return|>"), "مرحبا")
 
 
 class HarmonyStreamingTests(unittest.TestCase):
@@ -220,8 +219,10 @@ class FinalizerTests(unittest.TestCase):
 
 class SynchronousPathTests(unittest.TestCase):
     def test_same_two_rules_apply_off_the_stream(self):
-        self.assertEqual(finalize_text(LEAK_FULL_ENVELOPE).strip(),
-                         "رسوم الصف الأول الابتدائي 30,000 جنيه على ثلاث دفعات.")
+        self.assertEqual(
+            finalize_text(LEAK_FULL_ENVELOPE).strip(),
+            "رسوم الصف الأول الابتدائي 30,000 جنيه على ثلاث دفعات.",
+        )
         self.assertEqual(finalize_text("anything", has_tool_calls=True), "")
         self.assertEqual(finalize_text(CLEAN_ANSWER), CLEAN_ANSWER)
 
@@ -247,7 +248,7 @@ class GluedTranscriptTests(unittest.TestCase):
 
     def _stream(self, text, size):
         harmony = HarmonyFilter()
-        out = "".join(harmony.feed(text[i:i + size]) for i in range(0, len(text), size))
+        out = "".join(harmony.feed(text[i : i + size]) for i in range(0, len(text), size))
         return out + harmony.flush()
 
     def _at_every_size(self, text, expected):
@@ -275,8 +276,11 @@ class GluedTranscriptTests(unittest.TestCase):
     def test_a_final_marker_far_past_the_header_hold_is_still_found(self):
         """The hold releases at 96 characters; the answer channel can open later, so the
         message is kept whole until it does."""
-        text = ("analysisI need to check the chunks. " + "More reasoning here. " * 8
-                + "finalرسوم الصف الأول 30,000 جنيه. [1]")
+        text = (
+            "analysisI need to check the chunks. "
+            + "More reasoning here. " * 8
+            + "finalرسوم الصف الأول 30,000 جنيه. [1]"
+        )
         self._at_every_size(text, "رسوم الصف الأول 30,000 جنيه. [1]")
 
     def test_prose_that_merely_contains_a_channel_word_is_untouched(self):

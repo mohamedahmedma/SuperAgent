@@ -14,6 +14,7 @@ release before this one starts writing them again as conversations continue.
 Revision ID: 0005
 Revises: 0004
 """
+
 from collections.abc import Sequence
 
 from alembic import op

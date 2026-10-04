@@ -13,6 +13,7 @@ connection lost after the commit reached the database makes the retry run a writ
 has already happened. The conversation save does this with per-message idempotency keys
 (`MessageToStore.key`).
 """
+
 from __future__ import annotations
 
 import logging
@@ -60,8 +61,14 @@ def retry_transient(
             if attempt >= attempts or not is_transient(error):
                 raise
             delay = base_delay * (2 ** (attempt - 1)) * random.uniform(0.5, 1.0)
-            logger.warning("%s failed (attempt %d of %d), retrying in %.2fs: %s",
-                           describe, attempt, attempts, delay, error)
+            logger.warning(
+                "%s failed (attempt %d of %d), retrying in %.2fs: %s",
+                describe,
+                attempt,
+                attempts,
+                delay,
+                error,
+            )
             sleep(delay)
     raise RuntimeError("unreachable")  # pragma: no cover
 

@@ -24,15 +24,15 @@ verbatim. Re-indexing an unchanged corpus costs nothing, and identical input pro
 yields identical output — so the scope boundary cannot drift between deployments or
 between runs. Same reasoning as AssetExtraction, and the same shape.
 """
+
 from __future__ import annotations
 
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from backend.agent.prompts import render
+from backend.prompts import render
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,9 @@ class SummarySchema:
                 min_length=1,
                 max_length=max(max_questions, 1),
             )
-            topics: _List[str] = Field(default_factory=list, description="Labels from the supplied list")
+            topics: _List[str] = Field(
+                default_factory=list, description="Labels from the supplied list"
+            )
 
         # The vocabulary is enforced after generation rather than as a schema enum:
         # several providers reject enums inside arrays, and a rejected schema costs the

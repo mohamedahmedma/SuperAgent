@@ -15,6 +15,7 @@ parent hears back.
 Ownership is checked on every read. A note's URL carries its id, and that id resolves
 only for the account that sent it.
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,11 +23,11 @@ from dataclasses import dataclass
 from typing import Optional, Sequence
 from uuid import uuid4
 
+from backend.agent.chat.transcription import Transcriber
 from backend.application.ports.repositories import AttachmentRecord, NewAttachment
 from backend.application.ports.unit_of_work import UnitOfWorkFactory
 from backend.assets.blobs import BlobStore
 from backend.assets.dossier import compute_sha256
-from backend.agent.chat.transcription import Transcriber
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +56,18 @@ class VoiceNoteLimits:
     max_duration_ms: int = 5 * 60 * 1000
     #: What browsers record, and nothing else. `audio/webm` (Chrome, Firefox), `audio/ogg`
     #: (Firefox), `audio/mp4` (Safari); the rest are what a native client would send.
-    content_types: frozenset = frozenset({
-        "audio/webm", "audio/ogg", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/mpeg",
-        "audio/wav", "audio/x-wav",
-    })
+    content_types: frozenset = frozenset(
+        {
+            "audio/webm",
+            "audio/ogg",
+            "audio/mp4",
+            "audio/x-m4a",
+            "audio/aac",
+            "audio/mpeg",
+            "audio/wav",
+            "audio/x-wav",
+        }
+    )
 
 
 class ChatAttachments:
@@ -141,15 +150,18 @@ class ChatAttachments:
             raise VoiceNoteRejected(VoiceNoteRejected.EMPTY, "the recording is empty")
         if len(data) > limits.max_bytes:
             raise VoiceNoteRejected(
-                VoiceNoteRejected.TOO_LARGE, f"the recording is {len(data)} bytes; the limit is {limits.max_bytes}"
+                VoiceNoteRejected.TOO_LARGE,
+                f"the recording is {len(data)} bytes; the limit is {limits.max_bytes}",
             )
         if content_type not in limits.content_types:
             raise VoiceNoteRejected(
-                VoiceNoteRejected.UNSUPPORTED_TYPE, f"{content_type or 'no content type'} is not a recording format this accepts"
+                VoiceNoteRejected.UNSUPPORTED_TYPE,
+                f"{content_type or 'no content type'} is not a recording format this accepts",
             )
         if duration_ms and duration_ms > limits.max_duration_ms:
             raise VoiceNoteRejected(
-                VoiceNoteRejected.TOO_LONG, f"the recording is {duration_ms} ms; the limit is {limits.max_duration_ms}"
+                VoiceNoteRejected.TOO_LONG,
+                f"the recording is {duration_ms} ms; the limit is {limits.max_duration_ms}",
             )
 
 

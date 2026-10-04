@@ -11,6 +11,7 @@ Uploads are multipart: the file arrives as `UploadFile` and the options below as
 fields. They are modelled anyway so their descriptions reach OpenAPI and so a JSON-bodied
 variant of the endpoint cannot drift from the multipart one.
 """
+
 from datetime import date
 
 from pydantic import Field, computed_field

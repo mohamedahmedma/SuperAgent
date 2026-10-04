@@ -18,6 +18,7 @@ Three ways it did not, each found in production on 2026-09-14 and each pinned he
 The background runner has its own contract — order within a key, independence between
 keys, a barrier the next turn can wait on — and that is tested first, without a database.
 """
+
 import asyncio
 import importlib
 import json
@@ -199,21 +200,33 @@ class AppendOnlyStorageTests(unittest.TestCase):
         1 had stored its answer; under the old save, the later of the two rewrote the
         conversation and the earlier answer — and the first answer's image — was gone."""
         self._append("human", "Show me the PE uniform")
-        self._append("ai", "Here is the PE kit", trace={"tool_used": True, "asset_ids": ["uniforms::img1"]},
-                     metadata={"title": "PE uniform"})
-        self._append("human", "What are the bus fees?")          # turn 1
-        self._append("human", "And tomorrow's timetable?")       # turn 2, overlapping
+        self._append(
+            "ai",
+            "Here is the PE kit",
+            trace={"tool_used": True, "asset_ids": ["uniforms::img1"]},
+            metadata={"title": "PE uniform"},
+        )
+        self._append("human", "What are the bus fees?")  # turn 1
+        self._append("human", "And tomorrow's timetable?")  # turn 2, overlapping
         self._append("ai", "The documents do not cover bus fees.", metadata={"pending_hitl": None})
         self._append("ai", "Tomorrow: Arabic, Maths, PE.")
 
         rows = self._rows()
         self.assertEqual(6, len(rows))
         self.assertEqual(
-            ["Show me the PE uniform", "Here is the PE kit", "What are the bus fees?",
-             "And tomorrow's timetable?", "The documents do not cover bus fees.", "Tomorrow: Arabic, Maths, PE."],
+            [
+                "Show me the PE uniform",
+                "Here is the PE kit",
+                "What are the bus fees?",
+                "And tomorrow's timetable?",
+                "The documents do not cover bus fees.",
+                "Tomorrow: Arabic, Maths, PE.",
+            ],
             [row.content for row in rows],
         )
-        self.assertEqual(["uniforms::img1"], rows[1].rag_trace["asset_ids"], "the older answer kept its image")
+        self.assertEqual(
+            ["uniforms::img1"], rows[1].rag_trace["asset_ids"], "the older answer kept its image"
+        )
         _messages, metadata = self.storage.load_for_turn("parent", "s", window=6)
         self.assertEqual("PE uniform", metadata["title"])
         self.assertIsNone(metadata["pending_hitl"])
@@ -222,7 +235,9 @@ class AppendOnlyStorageTests(unittest.TestCase):
         """One Redis write failing used to leave the next turn loading a stale copy, and
         the save then deleted the rows the copy did not know about."""
         self._append("human", "Show me the PE uniform")
-        self._append("ai", "Here is the PE kit", trace={"tool_used": True, "asset_ids": ["uniforms::img1"]})
+        self._append(
+            "ai", "Here is the PE kit", trace={"tool_used": True, "asset_ids": ["uniforms::img1"]}
+        )
         self.storage.get_session_messages("parent", "s")  # warms the cache with two messages
 
         self.cache.writes_fail = True
@@ -256,16 +271,25 @@ class AppendOnlyStorageTests(unittest.TestCase):
         loads. And a slice must never be cached under the whole-conversation key, or the
         web app would page through a chat that looks `window` messages long."""
         for number in range(10):
-            self._append("human" if number % 2 == 0 else "ai", f"message {number}",
-                         trace={"retrieved_chunks": [{"text": "x" * 500}]})
+            self._append(
+                "human" if number % 2 == 0 else "ai",
+                f"message {number}",
+                trace={"retrieved_chunks": [{"text": "x" * 500}]},
+            )
 
         messages, _metadata = self.storage.load_for_turn("parent", "s", window=4)
 
-        self.assertEqual(["message 6", "message 7", "message 8", "message 9"],
-                         [message.content for message in messages])
-        self.assertEqual([HumanMessage, AIMessage, HumanMessage, AIMessage],
-                         [type(message) for message in messages])
-        self.assertIsNone(self.cache.get_json(ConversationStorage._messages_cache_key("parent", "s")))
+        self.assertEqual(
+            ["message 6", "message 7", "message 8", "message 9"],
+            [message.content for message in messages],
+        )
+        self.assertEqual(
+            [HumanMessage, AIMessage, HumanMessage, AIMessage],
+            [type(message) for message in messages],
+        )
+        self.assertIsNone(
+            self.cache.get_json(ConversationStorage._messages_cache_key("parent", "s"))
+        )
         self.assertEqual(10, len(self.storage.get_session_messages("parent", "s")))
 
     def test_a_turn_in_a_new_conversation_loads_nothing(self):
@@ -278,7 +302,9 @@ class AppendOnlyStorageTests(unittest.TestCase):
 
         page = self.storage.get_session_page("parent", "s", limit=10)
         self.assertEqual(["first", "second"], [message["content"] for message in page["messages"]])
-        self.assertEqual([], self.storage.list_session_infos("parent")[0:0])  # no error; list rebuilt
+        self.assertEqual(
+            [], self.storage.list_session_infos("parent")[0:0]
+        )  # no error; list rebuilt
         self.assertEqual(2, self.storage.list_session_infos("parent")[0]["message_count"])
 
     def test_append_returns_the_row_ids_in_order(self):
@@ -338,7 +364,9 @@ class StreamedTurnStorageTests(unittest.TestCase):
         self._agent(lambda ctx, *a, **k: FakeStreamAgent(ctx, chunks=["The bus leaves at 07:30."]))
 
         async def leave_at_done():
-            stream = service.chat_with_agent_stream("bus?", "u", "s", services=self._services(storage))
+            stream = service.chat_with_agent_stream(
+                "bus?", "u", "s", services=self._services(storage)
+            )
             async for chunk in stream:
                 if chunk == service._DONE:
                     break
@@ -347,7 +375,9 @@ class StreamedTurnStorageTests(unittest.TestCase):
         asyncio.run(leave_at_done())
         self.assertTrue(self.jobs.drain(timeout=5))
 
-        self.assertEqual(["bus?", "The bus leaves at 07:30."], [m.content for m in storage.messages])
+        self.assertEqual(
+            ["bus?", "The bus leaves at 07:30."], [m.content for m in storage.messages]
+        )
         self.assertEqual("title", storage.metadata["title"])
 
     def test_the_stream_reports_the_row_ids_once_the_turn_is_stored(self):
@@ -357,12 +387,19 @@ class StreamedTurnStorageTests(unittest.TestCase):
         self._agent(lambda ctx, *a, **k: FakeStreamAgent(ctx, chunks=["07:30."]))
 
         async def whole_stream():
-            return [chunk async for chunk in service.chat_with_agent_stream("bus?", "u", "s", services=self._services(storage))]
+            return [
+                chunk
+                async for chunk in service.chat_with_agent_stream(
+                    "bus?", "u", "s", services=self._services(storage)
+                )
+            ]
 
         chunks = asyncio.run(whole_stream())
 
         done_at = chunks.index(service._DONE)
-        stored = [json.loads(c[len("data: "):]) for c in chunks[done_at + 1:] if c.startswith("data: {")]
+        stored = [
+            json.loads(c[len("data: ") :]) for c in chunks[done_at + 1 :] if c.startswith("data: {")
+        ]
         self.assertEqual([{"type": "stored", "message_ids": [1, 2]}], stored)
 
     def test_a_stream_cut_off_mid_answer_stores_what_the_parent_saw(self):
@@ -374,7 +411,9 @@ class StreamedTurnStorageTests(unittest.TestCase):
         self._agent(_AgentThatStalls)
 
         async def cut_off_after_first_words():
-            stream = service.chat_with_agent_stream("fees?", "u", "s", services=self._services(storage))
+            stream = service.chat_with_agent_stream(
+                "fees?", "u", "s", services=self._services(storage)
+            )
 
             async def consume():
                 async for chunk in stream:
@@ -420,16 +459,21 @@ class StreamedTurnStorageTests(unittest.TestCase):
 
         def the_previous_turns_save():
             gate.wait(5)
-            storage.append("u", "s", [MessageToStore("human", "bus?"), MessageToStore("ai", "07:30.")])
+            storage.append(
+                "u", "s", [MessageToStore("human", "bus?"), MessageToStore("ai", "07:30.")]
+            )
 
         self.jobs.submit(TurnPipeline.conversation_key("u", "s"), the_previous_turns_save)
         self._agent(lambda ctx, *a, **k: FakeStreamAgent(ctx, chunks=["Arabic, Maths, PE."]))
         threading.Timer(0.2, gate.set).start()
 
         async def next_turn():
-            return [chunk async for chunk in service.chat_with_agent_stream(
-                "and tomorrow's timetable?", "u", "s", services=self._services(storage)
-            )]
+            return [
+                chunk
+                async for chunk in service.chat_with_agent_stream(
+                    "and tomorrow's timetable?", "u", "s", services=self._services(storage)
+                )
+            ]
 
         asyncio.run(next_turn())
 
@@ -437,7 +481,9 @@ class StreamedTurnStorageTests(unittest.TestCase):
             ["bus?", "07:30.", "and tomorrow's timetable?", "Arabic, Maths, PE."],
             [m.content for m in storage.messages],
         )
-        self.assertNotIn("title", storage.metadata, "the turn saw the earlier messages, so it was not the first")
+        self.assertNotIn(
+            "title", storage.metadata, "the turn saw the earlier messages, so it was not the first"
+        )
 
 
 if __name__ == "__main__":

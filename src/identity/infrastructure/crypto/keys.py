@@ -9,6 +9,7 @@ can do nothing with it but check a signature.
 That is what makes "authentication is handled at the authentication layer" a structural
 fact rather than a convention someone has to remember.
 """
+
 from __future__ import annotations
 
 import base64

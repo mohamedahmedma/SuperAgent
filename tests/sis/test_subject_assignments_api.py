@@ -26,6 +26,7 @@ statement about next term's timetable. The subject row survives, and every grade
 awarded under it survives — that is the difference between this and retiring a subject, and
 between both of those and a delete.
 """
+
 from datetime import date
 
 import pytest
@@ -219,9 +220,7 @@ def test_assigning_twice_produces_one_row_and_no_error(
     # Counted in the table rather than through the listing: the listing would answer
     # `["PHYS"]` for one row or for three, which is the bug this asserts against.
     with SqlAlchemyUnitOfWork() as unit:
-        rows = unit._session.execute(
-            text("SELECT COUNT(*) FROM subject_year_levels")
-        ).scalar_one()
+        rows = unit._session.execute(text("SELECT COUNT(*) FROM subject_year_levels")).scalar_one()
     assert rows == 1
 
     # Un-assigning is idempotent in the same way, and does not fail on an absent row.
@@ -349,19 +348,22 @@ def test_an_assignment_cannot_reach_across_schools_or_invent_a_grade(
         headers=registrar,
     )
     assert other.status_code == 201, other.text
-    assert client.post(
-        "/v1/structure/levels",
-        json={
-            "code": "OTHER-P1",
-            "school_code": "OTHER",
-            "track_code": "AR",
-            "name_en": "P1",
-            "name_ar": "P1",
-            "display_order": 1,
-            "stage": "primary",
-        },
-        headers=registrar,
-    ).status_code == 201
+    assert (
+        client.post(
+            "/v1/structure/levels",
+            json={
+                "code": "OTHER-P1",
+                "school_code": "OTHER",
+                "track_code": "AR",
+                "name_en": "P1",
+                "name_ar": "P1",
+                "display_order": 1,
+                "stage": "primary",
+            },
+            headers=registrar,
+        ).status_code
+        == 201
+    )
 
     refused = _assign(client, registrar, "PHYS", "OTHER-P1")
     assert refused.status_code == 404, refused.text

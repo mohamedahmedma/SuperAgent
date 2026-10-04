@@ -4,6 +4,7 @@ What the move buys is what these pin: a job started by one worker is readable by
 other, a job whose process died stops claiming to run, and two threads reporting on the
 same job cannot overwrite each other's step.
 """
+
 import threading
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -46,11 +47,15 @@ class LifecycleTests(IngestJobTestCase):
         self.uploads.update_step(job["job_id"], "parse", 40, message="Parsing")
 
         seen = self.tracker("upload").get_job(job["job_id"])
-        self.assertEqual(("running", "parse", "Parsing"), (seen["status"], seen["current_step"], seen["message"]))
+        self.assertEqual(
+            ("running", "parse", "Parsing"), (seen["status"], seen["current_step"], seen["message"])
+        )
 
     def test_a_step_update_clamps_percent_and_records_totals(self):
         job_id = self.uploads.create_job("fees.pdf")["job_id"]
-        job = self.uploads.update_step(job_id, "vector_store", 180, total_chunks=40, processed_chunks=12)
+        job = self.uploads.update_step(
+            job_id, "vector_store", 180, total_chunks=40, processed_chunks=12
+        )
 
         step = next(step for step in job["steps"] if step["key"] == "vector_store")
         self.assertEqual((100, "running"), (step["percent"], step["status"]))
@@ -60,14 +65,19 @@ class LifecycleTests(IngestJobTestCase):
         job_id = self.uploads.create_job("fees.pdf")["job_id"]
         job = self.uploads.complete_job(job_id, "Done")
 
-        self.assertEqual(("completed", "vector_store", None), (job["status"], job["current_step"], job["error"]))
+        self.assertEqual(
+            ("completed", "vector_store", None), (job["status"], job["current_step"], job["error"])
+        )
         self.assertEqual([100] * 5, [step["percent"] for step in job["steps"]])
 
     def test_failing_names_the_step_and_the_error(self):
         job_id = self.uploads.create_job("fees.pdf")["job_id"]
         job = self.uploads.fail_job(job_id, "parse", "could not extract content")
 
-        self.assertEqual(("failed", "parse", "could not extract content"), (job["status"], job["current_step"], job["error"]))
+        self.assertEqual(
+            ("failed", "parse", "could not extract content"),
+            (job["status"], job["current_step"], job["error"]),
+        )
         self.assertEqual("failed", next(s for s in job["steps"] if s["key"] == "parse")["status"])
 
     def test_unknown_jobs_and_steps_change_nothing(self):
@@ -142,7 +152,9 @@ class ConcurrencyTests(IngestJobTestCase):
             except Exception as exc:  # pragma: no cover - surfaced by the assertion below
                 errors.append(exc)
 
-        threads = [threading.Thread(target=report, args=(key,)) for key in ("parse", "vector_store")]
+        threads = [
+            threading.Thread(target=report, args=(key,)) for key in ("parse", "vector_store")
+        ]
         for thread in threads:
             thread.start()
         for thread in threads:
@@ -170,13 +182,19 @@ class SubProgressTests(IngestJobTestCase):
     def test_sub_progress_is_stored_and_read_back_by_another_worker(self):
         job = self.uploads.create_job("fees.pdf")
         self.uploads.update_step(
-            job["job_id"], "parse", 25, message="Extracting images: 3 of 12",
-            sub_label="Extracting images", sub_done=3, sub_total=12,
+            job["job_id"],
+            "parse",
+            25,
+            message="Extracting images: 3 of 12",
+            sub_label="Extracting images",
+            sub_done=3,
+            sub_total=12,
         )
 
         step = self._parse_step(self.tracker("upload").get_job(job["job_id"]))
-        self.assertEqual(("Extracting images", 3, 12),
-                         (step["sub_label"], step["sub_done"], step["sub_total"]))
+        self.assertEqual(
+            ("Extracting images", 3, 12), (step["sub_label"], step["sub_done"], step["sub_total"])
+        )
 
     def test_an_ordinary_update_leaves_a_running_sub_stage_alone(self):
         """The nested bar is driven by one caller and the step by another. Defaulting
@@ -184,7 +202,12 @@ class SubProgressTests(IngestJobTestCase):
         """
         job = self.uploads.create_job("fees.pdf")
         self.uploads.update_step(
-            job["job_id"], "parse", 25, sub_label="Extracting images", sub_done=3, sub_total=12,
+            job["job_id"],
+            "parse",
+            25,
+            sub_label="Extracting images",
+            sub_done=3,
+            sub_total=12,
         )
         self.uploads.update_step(job["job_id"], "parse", 30, message="still going")
 
@@ -195,7 +218,12 @@ class SubProgressTests(IngestJobTestCase):
     def test_sub_progress_on_one_step_never_touches_another(self):
         job = self.uploads.create_job("fees.pdf")
         self.uploads.update_step(
-            job["job_id"], "parse", 25, sub_label="Extracting images", sub_done=1, sub_total=4,
+            job["job_id"],
+            "parse",
+            25,
+            sub_label="Extracting images",
+            sub_done=1,
+            sub_total=4,
         )
         steps = {s["key"]: s for s in self.uploads.get_job(job["job_id"])["steps"]}
         self.assertEqual(0, steps["vector_store"]["sub_total"])

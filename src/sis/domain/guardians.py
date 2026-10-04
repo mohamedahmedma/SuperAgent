@@ -25,6 +25,7 @@ it deliberately, because a registrar reviewing a preview has considered the ques
 Framework-free like the rest of `sis/domain/`: stdlib and sibling value objects only,
 no clock, no database.
 """
+
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -100,14 +101,9 @@ class Guardian:
     is_active: bool = True
 
     def __post_init__(self) -> None:
-        phones = tuple(
-            phone if isinstance(phone, Phone) else Phone(phone)
-            for phone in self.phones
-        )
+        phones = tuple(phone if isinstance(phone, Phone) else Phone(phone) for phone in self.phones)
         if not phones:
-            raise ValidationError(
-                "a guardian needs at least one phone number", field="phone"
-            )
+            raise ValidationError("a guardian needs at least one phone number", field="phone")
         # Checked rather than silently de-duplicated: the same number twice on one
         # guardian is a registrar filling both columns with one value, and quietly
         # collapsing it would leave her looking as though she had supplied a second way
@@ -197,7 +193,9 @@ class StudentGuardian:
                     field="relationship_type",
                 ) from error
         object.__setattr__(
-            self, "relationship_label", _clean_name(self.relationship_label, field="relationship_label")
+            self,
+            "relationship_label",
+            _clean_name(self.relationship_label, field="relationship_label"),
         )
         object.__setattr__(
             self, "restriction_note", _clean_name(self.restriction_note, field="restriction_note")

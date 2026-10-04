@@ -11,6 +11,7 @@ Settings are read lazily and cached rather than captured at import time. Alembic
 `env.py`, pytest fixtures and `uvicorn --reload` all set variables *after* the package
 is first imported, and an import-time snapshot silently ignores them.
 """
+
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -92,9 +93,7 @@ def get_settings() -> Settings:
         import_preview_ttl_minutes=_int_env(
             "SIS_IMPORT_PREVIEW_TTL_MINUTES", _DEFAULT_PREVIEW_TTL_MINUTES
         ),
-        default_country_code=_country_code_env(
-            "SIS_DEFAULT_COUNTRY_CODE", _DEFAULT_COUNTRY_CODE
-        ),
+        default_country_code=_country_code_env("SIS_DEFAULT_COUNTRY_CODE", _DEFAULT_COUNTRY_CODE),
         db_pool_size=_int_env("SIS_DB_POOL_SIZE", 10),
         db_max_overflow=_int_env("SIS_DB_MAX_OVERFLOW", 10),
         db_pool_recycle_seconds=_int_env("SIS_DB_POOL_RECYCLE_SECONDS", 1800),

@@ -4,6 +4,7 @@ Both halves run on the webhook path, and both are written to the same rule: **th
 never raise.** Meta replays a delivery it does not see acknowledged for up to seven days,
 so one unhandled payload shape becomes a week of retries.
 """
+
 from __future__ import annotations
 
 import hashlib

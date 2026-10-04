@@ -5,6 +5,7 @@ feature like this actually dies — a plan field nothing renders, a render gate 
 returns None before the new value is looked at, a roster read that never starts because
 the caller is not a parent.
 """
+
 import os
 import unittest
 from unittest.mock import patch
@@ -57,7 +58,9 @@ class ThePlanCarriesIt(unittest.TestCase):
     def test_a_caller_that_passes_no_child_still_plans_a_turn(self):
         """Every existing caller — a test double, an integrating deployment — keeps
         working and simply plans a turn about nobody in particular."""
-        plan = resolve_turn(RequestSignals(question="q"), agent_config=_Agent(), copy_config=_Copy())
+        plan = resolve_turn(
+            RequestSignals(question="q"), agent_config=_Agent(), copy_config=_Copy()
+        )
         self.assertEqual(plan.child_hint, "")
 
     def test_the_two_are_never_both_set(self):
@@ -104,7 +107,9 @@ class ThePromptRendersIt(unittest.TestCase):
     def test_a_child_with_no_year_on_file_renders_without_one(self):
         """The state every child is in until SIS carries a year group."""
         yearless = ChildOption(student_id="S-9", label="سارة")
-        message = _turn_context_message(_plan(resolve_child(reference="context", roster=[yearless])))
+        message = _turn_context_message(
+            _plan(resolve_child(reference="context", roster=[yearless]))
+        )
 
         self.assertIn("سارة", message.content)
         self.assertNotIn("who is in", message.content)
@@ -150,9 +155,7 @@ class TheRosterReadStarts(unittest.TestCase):
             session_id = "s"
 
         rows = [{"student_id": "S-1", "full_name_ar": "علي"}]
-        ahead = child_roster.prefetch(
-            _Parent(), fetch=lambda *a: (child_roster.OK, rows)
-        )
+        ahead = child_roster.prefetch(_Parent(), fetch=lambda *a: (child_roster.OK, rows))
         outcome, children = ahead.result(timeout=5)
 
         self.assertEqual(outcome, child_roster.OK)

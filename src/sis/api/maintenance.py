@@ -5,6 +5,7 @@ still runs normally for bearer sessions; a global System Administrator grant is 
 bypass.  Liveness and sign-in remain reachable so an administrator can diagnose and
 recover a paused service.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -16,7 +17,6 @@ from starlette.responses import JSONResponse, Response
 from sis.application.services.access import read_system_state, resolve
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from sis.tenancy import get_registry
-
 
 _ALWAYS_AVAILABLE = frozenset({"/health", "/v1/auth/login", "/v1/auth/logout"})
 _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})

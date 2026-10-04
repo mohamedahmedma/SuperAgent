@@ -27,6 +27,7 @@ An unqualified "Name" is an alias of nothing. A single name column is no evidenc
 which language it holds, and a wrong guess prints an Arabic name into the English field
 of every report card the school issues.
 """
+
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -265,9 +266,7 @@ def map_columns(headers: Sequence[str], specs: Iterable[ColumnSpec]) -> ColumnMa
             claims.setdefault(claimants[0], []).append(header)
 
     mapping = {field: found[0] for field, found in claims.items() if len(found) == 1}
-    contested.update(
-        {field: tuple(found) for field, found in claims.items() if len(found) > 1}
-    )
+    contested.update({field: tuple(found) for field, found in claims.items() if len(found) > 1})
     # A contested field is not also reported as missing: telling a registrar that
     # 'student_number' was not found, about a file with two columns of student numbers,
     # sends her to add a third.

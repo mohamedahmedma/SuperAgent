@@ -3,6 +3,7 @@
 Its own router, and its own module, because it is the one endpoint here that is not
 authentication: it is what makes authentication possible everywhere else.
 """
+
 from fastapi import APIRouter
 
 from identity.api.deps import SigningKeyDep

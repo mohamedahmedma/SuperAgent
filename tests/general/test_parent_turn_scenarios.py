@@ -20,6 +20,7 @@ fabrication (2), and the missing year (4) is what made a wrong row plausible.
 Scenario names read as the parent's situation, not as the code path, so a failure says
 what a person would have seen.
 """
+
 import importlib
 import json
 import unittest
@@ -39,19 +40,31 @@ service = importlib.import_module("backend.agent.chat.service")
 YEAR_1 = "الصف الأول الابتدائي"
 
 FEE_CHUNKS = [
-    {"filename": "fees_2026.pdf", "page_number": "3",
-     "text": "رسوم الصف الأول الابتدائي للعام 2026: 30,000 جنيه على ثلاث دفعات."},
-    {"filename": "fees_2026.pdf", "page_number": "4",
-     "text": "رسوم الصف الثاني الابتدائي: 35,000 جنيه على ثلاث دفعات."},
-    {"filename": "fees_2026.pdf", "page_number": "5",
-     "text": "رسوم الصف الرابع الابتدائي: 45,000 جنيه على ثلاث دفعات."},
+    {
+        "filename": "fees_2026.pdf",
+        "page_number": "3",
+        "text": "رسوم الصف الأول الابتدائي للعام 2026: 30,000 جنيه على ثلاث دفعات.",
+    },
+    {
+        "filename": "fees_2026.pdf",
+        "page_number": "4",
+        "text": "رسوم الصف الثاني الابتدائي: 35,000 جنيه على ثلاث دفعات.",
+    },
+    {
+        "filename": "fees_2026.pdf",
+        "page_number": "5",
+        "text": "رسوم الصف الرابع الابتدائي: 45,000 جنيه على ثلاث دفعات.",
+    },
 ]
 
 # A document written once for everybody. The case where narrowing to a year would be
 # the WRONG answer, and the reason the grader's `discriminate` verdict exists.
 GENERAL_CHUNKS = [
-    {"filename": "transfer.pdf", "page_number": "1",
-     "text": "أوراق التحويل المطلوبة لكل الصفوف: شهادة الميلاد، آخر شهادة درجات، وصورة البطاقة."},
+    {
+        "filename": "transfer.pdf",
+        "page_number": "1",
+        "text": "أوراق التحويل المطلوبة لكل الصفوف: شهادة الميلاد، آخر شهادة درجات، وصورة البطاقة.",
+    },
 ]
 
 
@@ -101,20 +114,24 @@ class ScriptedAgent:
                 return
         for message_id, chunks, tool_calls in self.script:
             if tool_calls:
-                yield AIMessageChunk(
-                    content="", id=message_id, tool_call_chunks=tool_calls
-                ), {}
+                yield AIMessageChunk(content="", id=message_id, tool_call_chunks=tool_calls), {}
             for chunk in chunks:
                 yield AIMessageChunk(content=chunk, id=message_id), {}
 
 
 def _tool_chunk(index=0):
-    return [{"name": "search_knowledge_base", "args": '{"query":"x"}',
-             "id": f"c{index}", "index": index}]
+    return [
+        {
+            "name": "search_knowledge_base",
+            "args": '{"query":"x"}',
+            "id": f"c{index}",
+            "index": index,
+        }
+    ]
 
 
 def _split(text, size=7):
-    return [text[i:i + size] for i in range(0, len(text), size)]
+    return [text[i : i + size] for i in range(0, len(text), size)]
 
 
 def _parse_sse(chunks):
@@ -123,7 +140,7 @@ def _parse_sse(chunks):
         payload = chunk.strip()
         if not payload.startswith("data: "):
             continue
-        data = payload[len("data: "):]
+        data = payload[len("data: ") :]
         events.append({"type": "DONE"} if data == "[DONE]" else json.loads(data))
     return events
 
@@ -173,8 +190,9 @@ class ParentTurnScenario(unittest.IsolatedAsyncioTestCase):
 
         return FakeStorage([])
 
-    async def run_turn(self, script, trace=None, storage_messages=None, storage=None,
-                       question=None, on_run=None):
+    async def run_turn(
+        self, script, trace=None, storage_messages=None, storage=None, question=None, on_run=None
+    ):
         from tests.general.test_chat_hitl_resume import FakeStorage
 
         captured = {}
@@ -246,8 +264,10 @@ class ReasoningNeverReachesTheParent(ParentTurnScenario):
         self.assertEqual(shown.strip(), real)
 
     async def test_a_bare_channel_header_is_stripped_from_the_answer(self):
-        header = ("commentary to=functions.search_knowledge_base "
-                  "رسوم الصف الأول الابتدائي 30,000 جنيه. [1]")
+        header = (
+            "commentary to=functions.search_knowledge_base "
+            "رسوم الصف الأول الابتدائي 30,000 جنيه. [1]"
+        )
         _, shown, _ = await self.run_turn(
             [("m1", [], _tool_chunk()), ("m2", _split(header), None)],
             trace=_trace(FEE_CHUNKS),
@@ -266,8 +286,10 @@ class ReasoningNeverReachesTheParent(ParentTurnScenario):
 
     async def test_the_trace_reports_what_was_withheld(self):
         events, _, _ = await self.run_turn(
-            [("m1", _split("invented pre-tool answer"), _tool_chunk()),
-             ("m2", _split("رسوم الصف الأول 30,000 جنيه. [1]"), None)],
+            [
+                ("m1", _split("invented pre-tool answer"), _tool_chunk()),
+                ("m2", _split("رسوم الصف الأول 30,000 جنيه. [1]"), None),
+            ],
             trace=_trace(FEE_CHUNKS),
         )
         trace = next(e["rag_trace"] for e in events if e.get("type") == "trace")
@@ -282,8 +304,10 @@ class TheRightYearIsAnswered(ParentTurnScenario):
         self.plan.child_hint = "علي"
         self.plan.child_year = YEAR_1
         _, _, ctx = await self.run_turn(
-            [("m1", [], _tool_chunk()),
-             ("m2", _split("رسوم الصف الأول الابتدائي 30,000 جنيه. [1]"), None)],
+            [
+                ("m1", [], _tool_chunk()),
+                ("m2", _split("رسوم الصف الأول الابتدائي 30,000 جنيه. [1]"), None),
+            ],
             trace=_trace(FEE_CHUNKS),
         )
         self.assertEqual(ctx.child_year, YEAR_1)
@@ -304,8 +328,10 @@ class TheRightYearIsAnswered(ParentTurnScenario):
         self.plan.child_hint = "علي"
         self.plan.child_year = YEAR_1
         _, shown, _ = await self.run_turn(
-            [("m1", [], _tool_chunk()),
-             ("m2", _split("رسوم الصف الرابع الابتدائي 45,000 جنيه. [3]"), None)],
+            [
+                ("m1", [], _tool_chunk()),
+                ("m2", _split("رسوم الصف الرابع الابتدائي 45,000 جنيه. [3]"), None),
+            ],
             trace=_trace(FEE_CHUNKS),
         )
         self.assertIn("45,000", shown)
@@ -359,16 +385,19 @@ class AConversationThatBuilds(ParentTurnScenario):
     async def test_a_follow_up_instalment_is_served_not_blocked(self):
         storage = self.new_storage()
         _, first, _ = await self.run_turn(
-            [("m1", [], _tool_chunk()),
-             ("m2", _split("رسوم الصف الأول 30,000 جنيه على ثلاث دفعات. [1]"), None)],
-            trace=_trace(FEE_CHUNKS), storage=storage,
+            [
+                ("m1", [], _tool_chunk()),
+                ("m2", _split("رسوم الصف الأول 30,000 جنيه على ثلاث دفعات. [1]"), None),
+            ],
+            trace=_trace(FEE_CHUNKS),
+            storage=storage,
         )
         self.assertIn("30,000", first)
 
         _, second, _ = await self.run_turn(
-            [("m3", [], _tool_chunk()),
-             ("m4", _split("كل دفعة 10,000 جنيه. [1]"), None)],
-            trace=_trace(FEE_CHUNKS), storage=storage,
+            [("m3", [], _tool_chunk()), ("m4", _split("كل دفعة 10,000 جنيه. [1]"), None)],
+            trace=_trace(FEE_CHUNKS),
+            storage=storage,
             question="يعني الدفعة الواحدة كام؟",
         )
         self.assertEqual(second.strip(), "كل دفعة 10,000 جنيه. [1]")
@@ -377,13 +406,15 @@ class AConversationThatBuilds(ParentTurnScenario):
     async def test_the_second_turn_sees_the_first_one_s_history(self):
         storage = self.new_storage()
         await self.run_turn(
-            [("m1", [], _tool_chunk()),
-             ("m2", _split("رسوم الصف الأول 30,000 جنيه. [1]"), None)],
-            trace=_trace(FEE_CHUNKS), storage=storage,
+            [("m1", [], _tool_chunk()), ("m2", _split("رسوم الصف الأول 30,000 جنيه. [1]"), None)],
+            trace=_trace(FEE_CHUNKS),
+            storage=storage,
         )
         await self.run_turn(
             [("m3", _split("تمام."), None)],
-            trace=_trace(FEE_CHUNKS), storage=storage, question="شكرا",
+            trace=_trace(FEE_CHUNKS),
+            storage=storage,
+            question="شكرا",
         )
         texts = [getattr(m, "content", "") for m in storage.messages]
         self.assertIn("مصاريف ابني كام", texts)

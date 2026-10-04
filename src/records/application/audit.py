@@ -25,6 +25,7 @@ One JSON object per line, so a collector can index the fields rather than regex 
 No parent phone numbers, no child names — a guardian handle and a student number, the same
 discipline the rest of the estate keeps.
 """
+
 from __future__ import annotations
 
 import json

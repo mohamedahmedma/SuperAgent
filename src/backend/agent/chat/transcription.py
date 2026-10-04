@@ -11,6 +11,7 @@ is told there is no transcript to send.
 Never raises into the request. A transcriber that is down costs the parent a transcript,
 which the client reports and asks them to type; it must not cost them the recording.
 """
+
 from __future__ import annotations
 
 import logging
@@ -102,7 +103,9 @@ class WhisperTranscriber:
             else:
                 from openai import OpenAI
 
-                self._client = OpenAI(api_key=self._api_key, base_url=self._base_url, timeout=self._timeout)
+                self._client = OpenAI(
+                    api_key=self._api_key, base_url=self._base_url, timeout=self._timeout
+                )
         return self._client
 
     def transcribe(self, data: bytes, content_type: str) -> Transcript:
@@ -118,7 +121,11 @@ class WhisperTranscriber:
         except Exception:
             # Logged, not raised: the recording is already stored, and the parent is told
             # to type. The model id names what to look at; the audio itself is not logged.
-            logger.warning("transcription with %s failed; the voice note keeps no transcript", self._model, exc_info=True)
+            logger.warning(
+                "transcription with %s failed; the voice note keeps no transcript",
+                self._model,
+                exc_info=True,
+            )
             return Transcript("", Transcript.UNAVAILABLE)
         text = str(getattr(result, "text", "") or "").strip()
         return Transcript(text, Transcript.OK if text else Transcript.EMPTY)
@@ -150,7 +157,9 @@ def build_transcriber(environ: Optional[Mapping[str, str]] = None) -> Transcribe
         )
         return NoTranscriber()
     logger.info("voice notes will be transcribed with %s", model)
-    return WhisperTranscriber(api_key=api_key, model=model, base_url=(source.get("BASE_URL") or "").strip())
+    return WhisperTranscriber(
+        api_key=api_key, model=model, base_url=(source.get("BASE_URL") or "").strip()
+    )
 
 
 __all__ = ["NoTranscriber", "Transcriber", "Transcript", "WhisperTranscriber", "build_transcriber"]

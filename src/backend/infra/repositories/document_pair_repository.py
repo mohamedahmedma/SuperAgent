@@ -10,6 +10,7 @@ tracking an ORM object per pair only to copy four strings out of it cost more th
 query itself, and a save that looked the row up before writing it paid a round trip the
 upsert does not need.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

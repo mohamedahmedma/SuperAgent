@@ -22,6 +22,7 @@ UTC to begin with.
 
 Nothing here commits: an import that committed per row could not be abandoned.
 """
+
 from collections.abc import Collection, Sequence
 from datetime import datetime, timezone
 from typing import Any
@@ -110,11 +111,11 @@ class SqlAlchemyImportBatchRepository:
             stmt = stmt.limit(limit)
         return [_row_to_domain(row) for row in self._session.scalars(stmt)]
 
-    def count_rows(
-        self, batch_id: str, *, outcomes: Collection[RowOutcome] | None = None
-    ) -> int:
-        stmt = select(func.count()).select_from(models.ImportRow).where(
-            models.ImportRow.batch_id == self._pk(batch_id)
+    def count_rows(self, batch_id: str, *, outcomes: Collection[RowOutcome] | None = None) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(models.ImportRow)
+            .where(models.ImportRow.batch_id == self._pk(batch_id))
         )
         return self._session.scalar(_filtered(stmt, outcomes)) or 0
 
@@ -147,12 +148,8 @@ class SqlAlchemyImportBatchRepository:
         # Rows first, explicitly. `ondelete="CASCADE"` would cover it, but only while
         # SQLite's per-connection foreign-key pragma is on; a sweeper that leaves orphan
         # rows behind leaves them invisibly, and they are never read again to notice.
-        self._session.execute(
-            delete(models.ImportRow).where(models.ImportRow.batch_id.in_(stale))
-        )
-        self._session.execute(
-            delete(models.ImportBatch).where(models.ImportBatch.id.in_(stale))
-        )
+        self._session.execute(delete(models.ImportRow).where(models.ImportRow.batch_id.in_(stale)))
+        self._session.execute(delete(models.ImportBatch).where(models.ImportBatch.id.in_(stale)))
         self._session.flush()
         return len(stale)
 

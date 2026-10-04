@@ -16,6 +16,7 @@ weights or drops anything (decision 5): what a teacher stated is what is stored.
 Nothing here commits. The transaction boundary belongs to whoever composed the request;
 a repository that commits mid-import is how half a roster lands and the rest does not.
 """
+
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
@@ -25,13 +26,13 @@ from sqlalchemy.orm import Session
 from sis.application.ports.repositories import GradeKey
 from sis.domain.errors import UnknownReference
 from sis.domain.grades import SubjectGrade
-from sis.infrastructure.audit import actor_context
 from sis.domain.value_objects import (
     Percentage,
     StudentNumber,
     SubjectCode,
     TermCode,
 )
+from sis.infrastructure.audit import actor_context
 from sis.infrastructure.db import models
 
 
@@ -198,16 +199,24 @@ class SqlAlchemyGradeRepository:
                 to_update.append({"id": row_id, "recorded_by": actor, **stated})
                 previous = existing_rows[row_id]
                 old_values = {
-                    "percentage": previous.percentage, "points": previous.points,
-                    "max_points": previous.max_points, "recorded_by": previous.recorded_by,
+                    "percentage": previous.percentage,
+                    "points": previous.points,
+                    "max_points": previous.max_points,
+                    "recorded_by": previous.recorded_by,
                 }
                 new_values = {**stated, "recorded_by": actor, "student_id": triple[0]}
                 if old_values != new_values:
-                    self._session.add(models.AuditLog(
-                        actor_user_id=actor_user_id, actor=actor, action="grade_edit",
-                        entity_type="SubjectGrade", entity_id=str(row_id),
-                        old_values=old_values, new_values=new_values,
-                    ))
+                    self._session.add(
+                        models.AuditLog(
+                            actor_user_id=actor_user_id,
+                            actor=actor,
+                            action="grade_edit",
+                            entity_type="SubjectGrade",
+                            entity_id=str(row_id),
+                            old_values=old_values,
+                            new_values=new_values,
+                        )
+                    )
                 created[key] = False
 
         if to_insert:
@@ -236,18 +245,27 @@ class SqlAlchemyGradeRepository:
                 select(models.ClassSection).where(models.ClassSection.id.in_(section_ids))
             )
         }
-        subject_years = dict(self._session.execute(
-            select(models.Subject.id, models.Subject.academic_year_id)
-            .where(models.Subject.id.in_(subjects.values()))
-        ).all())
-        term_years = dict(self._session.execute(
-            select(models.Term.id, models.Term.academic_year_id)
-            .where(models.Term.id.in_(terms.values()))
-        ).all())
-        allowed_pairs = set(self._session.execute(
-            select(models.SubjectYearLevel.subject_id, models.SubjectYearLevel.year_level_id)
-            .where(models.SubjectYearLevel.subject_id.in_(subjects.values()))
-        ).all())
+        subject_years = dict(
+            self._session.execute(
+                select(models.Subject.id, models.Subject.academic_year_id).where(
+                    models.Subject.id.in_(subjects.values())
+                )
+            ).all()
+        )
+        term_years = dict(
+            self._session.execute(
+                select(models.Term.id, models.Term.academic_year_id).where(
+                    models.Term.id.in_(terms.values())
+                )
+            ).all()
+        )
+        allowed_pairs = set(
+            self._session.execute(
+                select(
+                    models.SubjectYearLevel.subject_id, models.SubjectYearLevel.year_level_id
+                ).where(models.SubjectYearLevel.subject_id.in_(subjects.values()))
+            ).all()
+        )
         for grade in grades:
             section = sections.get(grade.class_section_id)
             subject_id = subjects[str(grade.subject_code)]
@@ -292,9 +310,7 @@ class SqlAlchemyGradeRepository:
         found = {code: identifier for code, identifier in rows}
         missing = sorted(codes - found.keys())
         if missing:
-            raise UnknownReference(
-                f"no {noun} on file for: {', '.join(missing)}", field=field
-            )
+            raise UnknownReference(f"no {noun} on file for: {', '.join(missing)}", field=field)
         return found
 
     def _existing_ids(

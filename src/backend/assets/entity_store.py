@@ -10,6 +10,7 @@ Everything is a scalar comparison in the database. Nothing here calls a model, l
 an embedding, or looks at a pixel, which is the whole point: extraction happened once
 at ingest, and query time only narrows.
 """
+
 from __future__ import annotations
 
 import logging
@@ -62,7 +63,11 @@ class EntityAttributeIndex:
                     typed["value_text"] = str(item)[:255]
                 rows.append(
                     EntityAttributeRecord(
-                        asset_id=asset_id, profile=profile, name=name, value_key=_value_key(item), **typed
+                        asset_id=asset_id,
+                        profile=profile,
+                        name=name,
+                        value_key=_value_key(item),
+                        **typed,
                     )
                 )
         return rows
@@ -112,7 +117,11 @@ class EntityAttributeIndex:
     ) -> set:
         criteria: Dict[str, Any] = {}
         if spec.type is AttributeType.NUMBER:
-            bounds = condition if isinstance(condition, NumberRange) else NumberRange.model_validate(condition)
+            bounds = (
+                condition
+                if isinstance(condition, NumberRange)
+                else NumberRange.model_validate(condition)
+            )
             criteria.update(minimum=bounds.min, maximum=bounds.max)
         elif spec.type is AttributeType.BOOLEAN:
             criteria["boolean"] = bool(condition)

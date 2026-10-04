@@ -36,6 +36,7 @@ through the identity service. The same token serves every virtual parent — eac
 its own session, which is what the conversation store, the save ordering and the
 per-session locks key on. (A per-USER limit, item 38, would need distinct accounts.)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -77,13 +78,21 @@ def backend_env(stub: str = "http://127.0.0.1:8900/v1") -> dict:
     """
     return {
         "LLM_PROVIDER": "",
-        "BASE_URL": stub, "ARK_API_KEY": "stub", "MODEL": "stub-model", "FAST_MODEL": "stub-fast",
+        "BASE_URL": stub,
+        "ARK_API_KEY": "stub",
+        "MODEL": "stub-model",
+        "FAST_MODEL": "stub-fast",
         "GRADE_MODEL": "stub-grade",
-        "EMBEDDING_BACKEND": "openai", "EMBEDDING_BASE_URL": stub,
-        "EMBEDDING_API_KEY": "stub", "EMBEDDING_MODEL": "stub-embed",
-        "LANGSMITH_TRACING": "false", "LANGCHAIN_TRACING_V2": "false",
-        "CHAT_TURNS_PER_MINUTE": "0", "CHAT_CONCURRENT_TURNS": "0",
-        "QUERY_VECTOR_CACHE_TTL_SECONDS": "0", "RETRIEVAL_CACHE_TTL_SECONDS": "0",
+        "EMBEDDING_BACKEND": "openai",
+        "EMBEDDING_BASE_URL": stub,
+        "EMBEDDING_API_KEY": "stub",
+        "EMBEDDING_MODEL": "stub-embed",
+        "LANGSMITH_TRACING": "false",
+        "LANGCHAIN_TRACING_V2": "false",
+        "CHAT_TURNS_PER_MINUTE": "0",
+        "CHAT_CONCURRENT_TURNS": "0",
+        "QUERY_VECTOR_CACHE_TTL_SECONDS": "0",
+        "RETRIEVAL_CACHE_TTL_SECONDS": "0",
     }
 
 
@@ -139,14 +148,19 @@ class Level:
 
         return {
             "parents": self.parents,
-            "ttft_p50_ms": ms(self.ttft, 50), "ttft_p95_ms": ms(self.ttft, 95),
-            "turn_p50_ms": ms(self.turn, 50), "turn_p95_ms": ms(self.turn, 95),
+            "ttft_p50_ms": ms(self.ttft, 50),
+            "ttft_p95_ms": ms(self.ttft, 95),
+            "turn_p50_ms": ms(self.turn, 50),
+            "turn_p95_ms": ms(self.turn, 95),
             "closed_p95_ms": ms(self.closed, 95),
-            "settled_p95_ms": ms(self.settled, 95), "settled_max_ms": ms(self.settled, 100),
-            "save_hold_p50_ms": ms(self.save_hold, 50), "save_hold_p95_ms": ms(self.save_hold, 95),
+            "settled_p95_ms": ms(self.settled, 95),
+            "settled_max_ms": ms(self.settled, 100),
+            "save_hold_p50_ms": ms(self.save_hold, 50),
+            "save_hold_p95_ms": ms(self.save_hold, 95),
             "save_hold_max_ms": ms(self.save_hold, 100),
             "turns_per_s": round(done / self.wall, 2) if self.wall else 0.0,
-            "completed": done, "errors": dict(self.errors),
+            "completed": done,
+            "errors": dict(self.errors),
             "pg_peak_connections": self.pg_peak_total,
             "pg_peak_idle_in_transaction": self.pg_peak_idle_tx,
         }
@@ -194,8 +208,9 @@ class PostgresSampler:
             self._conn.close()
 
 
-async def one_parent(client: httpx.AsyncClient, url: str, token: str, asks: list[str],
-                     level: Level, timeout: float) -> None:
+async def one_parent(
+    client: httpx.AsyncClient, url: str, token: str, asks: list[str], level: Level, timeout: float
+) -> None:
     session = f"load-{uuid.uuid4().hex[:12]}"
     headers = {"Authorization": f"Bearer {token}", "X-Thread-ID": session}
     for question in asks:
@@ -206,14 +221,27 @@ async def one_parent(client: httpx.AsyncClient, url: str, token: str, asks: list
             level.settled.append((time.perf_counter() - started) * 1000)
 
 
-async def _one_turn(client: httpx.AsyncClient, url: str, headers: dict, session: str,
-                    question: str, level: Level, timeout: float, started: float) -> None:
+async def _one_turn(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    session: str,
+    question: str,
+    level: Level,
+    timeout: float,
+    started: float,
+) -> None:
     first = done = None
     route = ""
     errored = False
     try:
-        async with client.stream("POST", f"{url}/chat/stream", headers=headers, timeout=timeout,
-                                 json={"message": question, "session_id": session}) as response:
+        async with client.stream(
+            "POST",
+            f"{url}/chat/stream",
+            headers=headers,
+            timeout=timeout,
+            json={"message": question, "session_id": session},
+        ) as response:
             if response.status_code != 200:
                 level.fail(f"http_{response.status_code}")
                 await response.aread()
@@ -263,19 +291,36 @@ async def _one_turn(client: httpx.AsyncClient, url: str, headers: dict, session:
     level.save_hold.append((closed - done) * 1000)
 
 
-async def run_level(url: str, token: str, parents: int, turns: int, pool: list[str],
-                    database_url: str, timeout: float, offset: int = 0) -> Level:
+async def run_level(
+    url: str,
+    token: str,
+    parents: int,
+    turns: int,
+    pool: list[str],
+    database_url: str,
+    timeout: float,
+    offset: int = 0,
+) -> Level:
     level = Level(parents)
-    limits = httpx.Limits(max_connections=parents * 2 + 10, max_keepalive_connections=parents * 2 + 10)
+    limits = httpx.Limits(
+        max_connections=parents * 2 + 10, max_keepalive_connections=parents * 2 + 10
+    )
     async with httpx.AsyncClient(limits=limits) as client:
         with PostgresSampler(database_url) as sampler:
             started = time.perf_counter()
-            await asyncio.gather(*(
-                one_parent(client, url, token,
-                           [pool[(offset + p * turns + t) % len(pool)] for t in range(turns)],
-                           level, timeout)
-                for p in range(parents)
-            ))
+            await asyncio.gather(
+                *(
+                    one_parent(
+                        client,
+                        url,
+                        token,
+                        [pool[(offset + p * turns + t) % len(pool)] for t in range(turns)],
+                        level,
+                        timeout,
+                    )
+                    for p in range(parents)
+                )
+            )
             level.wall = time.perf_counter() - started
         level.pg_peak_total = sampler.peak_total
         level.pg_peak_idle_tx = sampler.peak_idle_tx
@@ -289,8 +334,9 @@ def get_token(identity: str) -> str:
     username, password = os.getenv("LOAD_USERNAME"), os.getenv("LOAD_PASSWORD")
     if not (username and password):
         raise SystemExit("set LOAD_TOKEN, or LOAD_USERNAME and LOAD_PASSWORD")
-    response = httpx.post(f"{identity}/v1/auth/login", timeout=20,
-                          json={"username": username, "password": password})
+    response = httpx.post(
+        f"{identity}/v1/auth/login", timeout=20, json={"username": username, "password": password}
+    )
     response.raise_for_status()
     return response.json()["access_token"]
 
@@ -298,12 +344,18 @@ def get_token(identity: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--url", default=os.getenv("LOAD_BACKEND_URL", "http://127.0.0.1:8000"))
-    parser.add_argument("--identity", default=os.getenv("LOAD_IDENTITY_URL", "http://127.0.0.1:8200"))
+    parser.add_argument(
+        "--identity", default=os.getenv("LOAD_IDENTITY_URL", "http://127.0.0.1:8200")
+    )
     parser.add_argument("--levels", default="1,5,10,20,40")
     parser.add_argument("--turns", type=int, default=3, help="questions per parent per level")
     parser.add_argument("--timeout", type=float, default=120.0)
-    parser.add_argument("--warmup", type=int, default=5,
-                        help="parents who each take one unmeasured turn before the first level")
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=5,
+        help="parents who each take one unmeasured turn before the first level",
+    )
     parser.add_argument("--label", default="run")
     parser.add_argument("--out", default="")
     args = parser.parse_args()
@@ -313,16 +365,28 @@ def main() -> int:
     database_url = os.getenv("LOAD_DATABASE_URL", "")
     rows = []
     print(f"{args.label}: {args.url}, {args.turns} turn(s) per parent")
-    print(f"{'parents':>7} {'ttft p50':>9} {'ttft p95':>9} {'turn p50':>9} {'turn p95':>9} "
-          f"{'any p95':>9} {'any max':>9} "
-          f"{'turns/s':>8} {'ok':>5} {'pg conns':>9} {'idle tx':>8}  errors")
+    print(
+        f"{'parents':>7} {'ttft p50':>9} {'ttft p95':>9} {'turn p50':>9} {'turn p95':>9} "
+        f"{'any p95':>9} {'any max':>9} "
+        f"{'turns/s':>8} {'ok':>5} {'pg conns':>9} {'idle tx':>8}  errors"
+    )
     if args.warmup:
         # A freshly started backend pays its cold starts — model clients, the scope index,
         # the first Milvus and Postgres connections — on its first turns. Measured, they
         # would land in whichever level runs first and make two runs incomparable. Warmed
         # from the END of the pool, so no measured level asks a question it has seen.
-        asyncio.run(run_level(args.url, token, args.warmup, 1, pool, "", args.timeout,
-                              offset=len(pool) - args.warmup))
+        asyncio.run(
+            run_level(
+                args.url,
+                token,
+                args.warmup,
+                1,
+                pool,
+                "",
+                args.timeout,
+                offset=len(pool) - args.warmup,
+            )
+        )
     # Every level asks questions no earlier level asked. The backend remembers recent
     # query embeddings; a level that repeated its predecessor's questions would skip that
     # call and look faster than it is — which is how an early baseline row read 2.7 s.
@@ -332,20 +396,34 @@ def main() -> int:
         # can outlive one — after which every turn is a 401 and the report blames auth
         # for what was a hang.
         token = get_token(args.identity)
-        level = asyncio.run(run_level(args.url, token, parents, args.turns, pool,
-                                      database_url, args.timeout, offset=offset))
+        level = asyncio.run(
+            run_level(
+                args.url,
+                token,
+                parents,
+                args.turns,
+                pool,
+                database_url,
+                args.timeout,
+                offset=offset,
+            )
+        )
         offset += parents * args.turns
         row = level.row()
         rows.append(row)
         shown = {k: ("-" if v is None else v) for k, v in row.items()}
-        print(f"{parents:>7} {shown['ttft_p50_ms']:>9} {shown['ttft_p95_ms']:>9} "
-              f"{shown['turn_p50_ms']:>9} {shown['turn_p95_ms']:>9} "
-              f"{shown['settled_p95_ms']:>9} {shown['settled_max_ms']:>9} {row['turns_per_s']:>8} "
-              f"{row['completed']:>5} {row['pg_peak_connections']:>9} "
-              f"{row['pg_peak_idle_in_transaction']:>8}  {row['errors'] or ''}", flush=True)
+        print(
+            f"{parents:>7} {shown['ttft_p50_ms']:>9} {shown['ttft_p95_ms']:>9} "
+            f"{shown['turn_p50_ms']:>9} {shown['turn_p95_ms']:>9} "
+            f"{shown['settled_p95_ms']:>9} {shown['settled_max_ms']:>9} {row['turns_per_s']:>8} "
+            f"{row['completed']:>5} {row['pg_peak_connections']:>9} "
+            f"{row['pg_peak_idle_in_transaction']:>8}  {row['errors'] or ''}",
+            flush=True,
+        )
     if args.out:
-        Path(args.out).write_text(json.dumps({"label": args.label, "levels": rows}, indent=2),
-                                  encoding="utf-8")
+        Path(args.out).write_text(
+            json.dumps({"label": args.label, "levels": rows}, indent=2), encoding="utf-8"
+        )
     return 0
 
 

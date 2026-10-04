@@ -21,15 +21,16 @@ which a client rendering as absent would use to accuse a child nobody looked at.
 derived from it, and there is no age column anywhere: a stored age is right for one year and
 silently wrong afterwards.
 """
+
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from tests.sis.conftest import Clock, registrar_headers
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
+from tests.sis.conftest import Clock, registrar_headers
 
 NC = "NC"
 MD = "MD"
@@ -252,30 +253,82 @@ def test_bilingual_school_has_two_independent_academic_tracks(
 def test_configured_grade_and_class_creation_uses_only_active_grades(
     client: TestClient, registrar: dict[str, str]
 ) -> None:
-    client.post("/v1/schools", json={"code":"S4","name_en":"Stage Four","name_ar":"المرحلة الرابعة",
-        "language_type":"languages","kg_grade_count":2,"primary_grade_count":1,
-        "preparatory_grade_count":0,"secondary_grade_count":0,"term_count":2,
-        "working_days":["sunday"]}, headers=registrar)
-    client.post("/v1/academic-years", json={"code":"S4-2026","school_code":"S4",
-        "name_en":"2026","name_ar":"2026","starts_on":"2026-09-01","ends_on":"2027-06-30","is_current":False},
-        headers=registrar)
+    client.post(
+        "/v1/schools",
+        json={
+            "code": "S4",
+            "name_en": "Stage Four",
+            "name_ar": "المرحلة الرابعة",
+            "language_type": "languages",
+            "kg_grade_count": 2,
+            "primary_grade_count": 1,
+            "preparatory_grade_count": 0,
+            "secondary_grade_count": 0,
+            "term_count": 2,
+            "working_days": ["sunday"],
+        },
+        headers=registrar,
+    )
+    client.post(
+        "/v1/academic-years",
+        json={
+            "code": "S4-2026",
+            "school_code": "S4",
+            "name_en": "2026",
+            "name_ar": "2026",
+            "starts_on": "2026-09-01",
+            "ends_on": "2027-06-30",
+            "is_current": False,
+        },
+        headers=registrar,
+    )
     grades = client.get("/v1/schools/S4/tracks/LANG/configured-grades", headers=registrar).json()
     assert [grade["code"] for grade in grades] == ["LANG-KG1", "LANG-KG2", "LANG-P1"]
-    made = client.post("/v1/structure/configured-classes", json={"academic_year_code":"S4-2026",
-        "track_code":"LANG","mode":"custom","classes_by_grade":{"LANG-KG1":1,"LANG-KG2":2,"LANG-P1":1},
-        "sequence":"alphabetic"}, headers=registrar)
+    made = client.post(
+        "/v1/structure/configured-classes",
+        json={
+            "academic_year_code": "S4-2026",
+            "track_code": "LANG",
+            "mode": "custom",
+            "classes_by_grade": {"LANG-KG1": 1, "LANG-KG2": 2, "LANG-P1": 1},
+            "sequence": "alphabetic",
+        },
+        headers=registrar,
+    )
     assert made.status_code == 200, made.text
-    assert {row["code"] for row in made.json()} == {"LANG-KG1-A","LANG-KG2-A","LANG-KG2-B","LANG-P1-A"}
-    client.post("/v1/subjects", json={"code":"SCI","academic_year_code":"S4-2026",
-        "name_en":"Science","name_ar":"العلوم"}, headers=registrar)
-    assignment = {"academic_year_code":"S4-2026","subject_code":"SCI",
-        "year_level_code":"LANG-P1","assigned":True}
-    assert client.put("/v1/subject-assignments", json=assignment, headers=registrar).status_code == 204
-    assert client.put("/v1/subject-assignments", json=assignment, headers=registrar).status_code == 204
+    assert {row["code"] for row in made.json()} == {
+        "LANG-KG1-A",
+        "LANG-KG2-A",
+        "LANG-KG2-B",
+        "LANG-P1-A",
+    }
+    client.post(
+        "/v1/subjects",
+        json={
+            "code": "SCI",
+            "academic_year_code": "S4-2026",
+            "name_en": "Science",
+            "name_ar": "العلوم",
+        },
+        headers=registrar,
+    )
+    assignment = {
+        "academic_year_code": "S4-2026",
+        "subject_code": "SCI",
+        "year_level_code": "LANG-P1",
+        "assigned": True,
+    }
+    assert (
+        client.put("/v1/subject-assignments", json=assignment, headers=registrar).status_code == 204
+    )
+    assert (
+        client.put("/v1/subject-assignments", json=assignment, headers=registrar).status_code == 204
+    )
     assigned = client.get("/v1/subject-assignments?academic_year=S4-2026", headers=registrar).json()
-    assert [(row["year_level_code"], [subject["code"] for subject in row["subjects"]]) for row in assigned] == [
-        ("LANG-P1", ["SCI"])
-    ]
+    assert [
+        (row["year_level_code"], [subject["code"] for subject in row["subjects"]])
+        for row in assigned
+    ] == [("LANG-P1", ["SCI"])]
 
 
 def test_school_creation_validates_levels_terms_and_grade_limits(
@@ -294,12 +347,18 @@ def test_school_creation_validates_levels_terms_and_grade_limits(
         "working_days": ["sunday"],
     }
     assert client.post("/v1/schools", json=base, headers=registrar).status_code == 422
-    assert client.post(
-        "/v1/schools", json={**base, "kg_grade_count": 4}, headers=registrar
-    ).status_code == 422
-    assert client.post(
-        "/v1/schools", json={**base, "kg_grade_count": 1, "term_count": 4}, headers=registrar
-    ).status_code == 422
+    assert (
+        client.post(
+            "/v1/schools", json={**base, "kg_grade_count": 4}, headers=registrar
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/v1/schools", json={**base, "kg_grade_count": 1, "term_count": 4}, headers=registrar
+        ).status_code
+        == 422
+    )
 
 
 def test_closing_a_branch_keeps_the_configuration_it_was_created_with(
@@ -404,8 +463,12 @@ def test_disabled_school_level_cannot_be_added(
     refused = client.post(
         "/v1/structure/levels",
         json={
-            "code": "KG1", "school_code": "PRI", "name_en": "KG 1",
-            "name_ar": "كي جي ١", "display_order": 1, "stage": "garden",
+            "code": "KG1",
+            "school_code": "PRI",
+            "name_en": "KG 1",
+            "name_ar": "كي جي ١",
+            "display_order": 1,
+            "stage": "garden",
         },
         headers=registrar,
     )
@@ -545,9 +608,8 @@ def test_a_class_is_wired_to_its_own_schools_rung(two_schools: TestClient) -> No
 
     assert rows, "the fixture seeded no classes, so this proves nothing"
     crossed = [row for row in rows if row.rung_school != row.class_school]
-    assert not crossed, (
-        "a class is attached to another school's rung: "
-        + ", ".join(f"class at {row.class_school} -> rung at {row.rung_school}" for row in crossed)
+    assert not crossed, "a class is attached to another school's rung: " + ", ".join(
+        f"class at {row.class_school} -> rung at {row.rung_school}" for row in crossed
     )
 
 
@@ -564,9 +626,7 @@ def test_a_new_school_starts_with_no_classes_of_its_own(two_schools: TestClient)
     no classes answers "no classes", whatever the neighbouring branches hold.
     """
     with SqlAlchemyUnitOfWork() as uow:
-        uow.schools.upsert_many(
-            [School(code="ALX", name_en="Alexandria", name_ar="الإسكندرية")]
-        )
+        uow.schools.upsert_many([School(code="ALX", name_en="Alexandria", name_ar="الإسكندرية")])
         uow.academic_years.upsert_many(
             [
                 AcademicYear(
@@ -682,7 +742,7 @@ def test_the_ladder_is_grouped_youngest_stage_first(
 def test_a_mistyped_stage_is_refused_rather_than_silently_unspecified(
     two_schools: TestClient, registrar: dict[str, str]
 ) -> None:
-    """"secondry" would otherwise create a rung missing from the secondary group."""
+    """ "secondry" would otherwise create a rung missing from the secondary group."""
     refused = two_schools.post(
         "/v1/structure/levels",
         json={
@@ -974,25 +1034,26 @@ def test_a_past_day_only_opens_far_enough_to_excuse_an_absence(
     _place(two_schools, registrar, "K-1", NC_YEAR, "3A", "2026-09-01")
     clock.set("2026-09-01")
     url = f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01"
-    assert two_schools.put(
-        url, json={"entries": [{"student_number": "K-1", "state": "absent"}]},
-        headers=registrar,
-    ).status_code == 200
+    assert (
+        two_schools.put(
+            url,
+            json={"entries": [{"student_number": "K-1", "state": "absent"}]},
+            headers=registrar,
+        ).status_code
+        == 200
+    )
 
     clock.set("2026-09-02")
     refused = two_schools.put(
-        url, json={"entries": [{"student_number": "K-1", "state": "present"}]},
+        url,
+        json={"entries": [{"student_number": "K-1", "state": "present"}]},
         headers=registrar,
     )
     assert refused.status_code == 422, refused.text
 
     allowed = two_schools.put(
         url,
-        json={
-            "entries": [
-                {"student_number": "K-1", "state": "excused", "note": "note from home"}
-            ]
-        },
+        json={"entries": [{"student_number": "K-1", "state": "excused", "note": "note from home"}]},
         headers=registrar,
     )
     assert allowed.status_code == 200, allowed.text
@@ -1184,5 +1245,3 @@ def test_patching_contact_details_leaves_the_rest_of_the_record_alone(
     assert body["contact_phone"] == "+201111111111"
     assert body["date_of_birth"] == "2015-05-05", "a birth date was erased by omission"
     assert body["full_name_en"] == "Child M1"
-
-

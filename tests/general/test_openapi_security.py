@@ -16,6 +16,7 @@ carries a `tokenUrl`. Three things followed, and all three are asserted here.
 The runtime half is asserted too, because the fix must not have moved it: the refusals a
 caller sees for a missing, malformed or invalid credential are the ones it saw before.
 """
+
 import unittest
 
 from fastapi import Depends, FastAPI
@@ -114,17 +115,13 @@ class RefusalTests(unittest.TestCase):
 
     def test_a_well_formed_token_reaches_the_route(self):
         """The happy path: the dependency yields the token, unwrapped and unmodified."""
-        response = self.client.get(
-            "/protected", headers={"Authorization": "Bearer a.b.c"}
-        )
+        response = self.client.get("/protected", headers={"Authorization": "Bearer a.b.c"})
         self.assertEqual(200, response.status_code)
         self.assertEqual("a.b.c", response.json()["token"])
 
     def test_a_lowercase_scheme_is_accepted(self):
         """RFC 7235 makes the scheme case-insensitive, and the old scheme accepted it."""
-        response = self.client.get(
-            "/protected", headers={"Authorization": "bearer a.b.c"}
-        )
+        response = self.client.get("/protected", headers={"Authorization": "bearer a.b.c"})
         self.assertEqual(200, response.status_code)
         self.assertEqual("a.b.c", response.json()["token"])
 
@@ -136,9 +133,7 @@ class RefusalTests(unittest.TestCase):
 
     def test_another_scheme_is_401_not_500(self):
         """A browser with a stale Basic credential must be refused, not crash the route."""
-        response = self.client.get(
-            "/protected", headers={"Authorization": "Basic dXNlcjpwYXNz"}
-        )
+        response = self.client.get("/protected", headers={"Authorization": "Basic dXNlcjpwYXNz"})
         self.assertEqual(401, response.status_code)
         self.assertEqual("Bearer", response.headers.get("www-authenticate"))
 

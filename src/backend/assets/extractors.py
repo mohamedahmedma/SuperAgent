@@ -13,17 +13,17 @@ Two implementations behind one port:
 The pipeline runs the configured extractor and falls back to the heuristic one on any
 failure, so a vision outage degrades recall instead of failing an upload.
 """
+
 from __future__ import annotations
 
 import base64
 import io
 import logging
-import os
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import List, Literal, Optional
+from typing import List, Literal
 
 from pydantic import BaseModel, Field
 
@@ -101,8 +101,7 @@ class FigureExtractor(ABC):
     name: str = "extractor"
 
     @abstractmethod
-    def extract(self, request: ExtractionRequest) -> ExtractionPayload:
-        ...
+    def extract(self, request: ExtractionRequest) -> ExtractionPayload: ...
 
 
 class HeuristicExtractor(FigureExtractor):
@@ -195,7 +194,7 @@ class VisionExtractor(FigureExtractor):
         return f"data:{content_type};base64,{encoded}"
 
     def extract(self, request: ExtractionRequest) -> ExtractionPayload:
-        from backend.agent.prompts import resolve as resolve_prompt
+        from backend.prompts import resolve as resolve_prompt
 
         prompt = resolve_prompt(
             self._config.extraction_prompt,
@@ -239,7 +238,8 @@ class VisionExtractor(FigureExtractor):
                 pipeline="figure",
                 model_used=self._model_id,
                 confidence=float(result.confidence or 0.0),
-                needs_review=float(result.confidence or 0.0) < self._config.escalate_below_confidence,
+                needs_review=float(result.confidence or 0.0)
+                < self._config.escalate_below_confidence,
                 extracted_at=datetime.now(UTC),
             ),
         )

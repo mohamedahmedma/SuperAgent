@@ -15,6 +15,7 @@ that fails halfway leaves the database as it found it. That matters more here th
 looks: a half-loaded demo is worse than none, because the missing half is invisible until
 somebody tries the screen that needed it.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -106,6 +107,7 @@ def cmd_arabic_showcase(args: argparse.Namespace) -> int:
 
 def cmd_validate_arabic_showcase(args: argparse.Namespace) -> int:
     from sis.demo.arabic_showcase import validate
+
     with seeder.open_session(args.school) as session:
         for line in validate(session):
             print(line)
@@ -115,8 +117,12 @@ def cmd_validate_arabic_showcase(args: argparse.Namespace) -> int:
 def cmd_final_reset(args: argparse.Namespace) -> int:
     """Replace only the named final showcase after an explicit confirmation."""
     from sis.demo import arabic_showcase
+
     if args.confirm_school != arabic_showcase.SCHOOL_CODE:
-        print(f"Refused: pass --confirm-school {arabic_showcase.SCHOOL_CODE!r} exactly.", file=sys.stderr)
+        print(
+            f"Refused: pass --confirm-school {arabic_showcase.SCHOOL_CODE!r} exactly.",
+            file=sys.stderr,
+        )
         return 2
     seeder.guard_environment(allow_remote=args.allow_remote)
     with seeder.open_session(args.school) as session:
@@ -125,7 +131,8 @@ def cmd_final_reset(args: argparse.Namespace) -> int:
         session.commit()
     print(f"Removed {removed} final-showcase row(s) for {arabic_showcase.SCHOOL_CODE} only.")
     print("Final showcase written:")
-    for name, value in counts.items(): print(f"  {name.replace('_', ' '):<22} {value}")
+    for name, value in counts.items():
+        print(f"  {name.replace('_', ' '):<22} {value}")
     return 0
 
 
@@ -193,8 +200,7 @@ def cmd_accounts(_args: argparse.Namespace) -> int:
     width = max(len(person.username) for person in bp.STAFF) + 2
     for person in bp.STAFF:
         roles = ", ".join(
-            f"{grant.role.value}"
-            + ("" if grant.scope_ref is None else f"@{grant.scope_ref}")
+            f"{grant.role.value}" + ("" if grant.scope_ref is None else f"@{grant.scope_ref}")
             for grant in person.roles
         )
         print(f"{person.username:<{width}} {person.full_name_en}")
@@ -224,9 +230,7 @@ def _print_password_warning() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     _configure_output()
-    parser = argparse.ArgumentParser(
-        prog="python -m sis.demo", description=__doc__.splitlines()[0]
-    )
+    parser = argparse.ArgumentParser(prog="python -m sis.demo", description=__doc__.splitlines()[0])
     parser.add_argument(
         "--school",
         default=None,
@@ -263,7 +267,9 @@ def main(argv: list[str] | None = None) -> int:
         help="explicitly approve adding this fictional presentation school to production",
     )
     arabic_showcase.set_defaults(handler=cmd_arabic_showcase)
-    final_reset = sub.add_parser("final-reset", help="replace only the final Arabic showcase school")
+    final_reset = sub.add_parser(
+        "final-reset", help="replace only the final Arabic showcase school"
+    )
     final_reset.add_argument("--confirm-school", required=True, help="must equal ARABIC-DEMO")
     final_reset.set_defaults(handler=cmd_final_reset)
     sub.add_parser(
@@ -277,16 +283,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("reset", help="remove the demo school, then write it again").set_defaults(
         handler=cmd_reset
     )
-    sub.add_parser("drop", help="remove the demo school and stop").set_defaults(
-        handler=cmd_drop
-    )
+    sub.add_parser("drop", help="remove the demo school and stop").set_defaults(handler=cmd_drop)
     sub.add_parser("status", help="what is in this database").set_defaults(handler=cmd_status)
     sub.add_parser("classes", help="every class and its generated title").set_defaults(
         handler=cmd_classes
     )
-    sub.add_parser("accounts", help="the demo credentials table").set_defaults(
-        handler=cmd_accounts
-    )
+    sub.add_parser("accounts", help="the demo credentials table").set_defaults(handler=cmd_accounts)
 
     args = parser.parse_args(argv)
     try:

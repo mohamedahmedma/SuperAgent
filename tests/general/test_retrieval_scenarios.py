@@ -10,6 +10,7 @@ and no empty strings; those live in `test_arabic_and_adversarial.py`. What these
 against is the failure that unit tests miss: each piece correct, and the sequence still
 wrong.
 """
+
 import re
 import unittest
 
@@ -159,7 +160,9 @@ class BilingualCorpusRoutingTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.pairs = DocumentPairService(unit_of_work=postgres_schema(self, DocumentPair).unit_of_work)
+        self.pairs = DocumentPairService(
+            unit_of_work=postgres_schema(self, DocumentPair).unit_of_work
+        )
 
         # Fees and the calendar exist in both languages; bus routes are English only
         # and the uniform policy is Arabic only.
@@ -198,8 +201,10 @@ class BilingualCorpusRoutingTests(unittest.TestCase):
         for question in ["المصاريف كام؟", "How much are the fees?"]:
             with self.subTest(question=question):
                 excluded = self._excluded(question)
-                for pair in (("fees_ar.docx", "fees_en.docx"),
-                             ("calendar_ar.docx", "calendar_en.docx")):
+                for pair in (
+                    ("fees_ar.docx", "fees_en.docx"),
+                    ("calendar_ar.docx", "calendar_en.docx"),
+                ):
                     surviving = [name for name in pair if name not in excluded]
                     self.assertEqual(1, len(surviving), f"{pair} -> {surviving}")
 
@@ -220,7 +225,9 @@ class RetrievalFilterShapeTests(unittest.TestCase):
     """What the routing decision looks like by the time Milvus sees it."""
 
     def setUp(self):
-        self.pairs = DocumentPairService(unit_of_work=postgres_schema(self, DocumentPair).unit_of_work)
+        self.pairs = DocumentPairService(
+            unit_of_work=postgres_schema(self, DocumentPair).unit_of_work
+        )
         # `language_filter_clause` resolves its service from the process container;
         # point that at this test's own.
         set_default_services(Services(document_pairs=self.pairs))

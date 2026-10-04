@@ -5,11 +5,11 @@ from typing import Sequence
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from backend.agent.schemas.chat import normalize_rag_trace
 from backend.application.ports.repositories import NewMessage, StoredMessage
 from backend.application.ports.unit_of_work import UnitOfWorkFactory
 from backend.infra.cache import RedisCache
 from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
-from backend.agent.schemas.chat import normalize_rag_trace
 
 
 @dataclass(frozen=True)
@@ -129,20 +129,22 @@ class ConversationStorage:
             session = uow.conversations.open_session(user_id, session_id, {})
             if session is None:
                 return []
-            ids = list(uow.conversations.add_messages(
-                session,
-                [
-                    NewMessage(
-                        message_type=message.message_type,
-                        content=str(message.content),
-                        timestamp=now,
-                        rag_trace=normalize_rag_trace(message.rag_trace),
-                        attachment_id=message.attachment_id or None,
-                        client_key=message.key,
-                    )
-                    for message in messages
-                ],
-            ))
+            ids = list(
+                uow.conversations.add_messages(
+                    session,
+                    [
+                        NewMessage(
+                            message_type=message.message_type,
+                            content=str(message.content),
+                            timestamp=now,
+                            rag_trace=normalize_rag_trace(message.rag_trace),
+                            attachment_id=message.attachment_id or None,
+                            client_key=message.key,
+                        )
+                        for message in messages
+                    ],
+                )
+            )
             uow.conversations.patch_session(session, metadata=metadata or None, updated_at=now)
             uow.commit()
 
@@ -262,7 +264,9 @@ class ConversationStorage:
         # Entries written before ids were cached carry no cursor, so they cannot be paged
         # from; the database answers instead, and the next read refreshes them.
         if cached is not None and all(item.get("id") is not None for item in cached):
-            return self._page_from_records(self._normalize_message_records(cached), limit, before_id)
+            return self._page_from_records(
+                self._normalize_message_records(cached), limit, before_id
+            )
 
         with self._unit_of_work() as uow:
             session = uow.conversations.find_session(user_id, session_id)
@@ -270,7 +274,9 @@ class ConversationStorage:
                 return {"messages": [], "has_more": False}
             # One row of headroom: the newest `limit` messages, plus the single row that
             # answers "is there more" without a second COUNT query.
-            rows = list(uow.conversations.latest_messages(session, limit=limit + 1, before_id=before_id))
+            rows = list(
+                uow.conversations.latest_messages(session, limit=limit + 1, before_id=before_id)
+            )
 
         has_more = len(rows) > limit
         window = list(reversed(rows[:limit]))
@@ -283,7 +289,9 @@ class ConversationStorage:
     def _page_from_records(records: list[dict], limit: int, before_id: int | None) -> dict:
         """The same window, taken from the cached conversation instead of the database."""
         if before_id is not None:
-            records = [item for item in records if item.get("id") is not None and item["id"] < before_id]
+            records = [
+                item for item in records if item.get("id") is not None and item["id"] < before_id
+            ]
         window = records[-limit:] if limit < len(records) else records
         return {"messages": window, "has_more": len(records) > len(window)}
 

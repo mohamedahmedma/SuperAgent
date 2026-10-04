@@ -29,6 +29,7 @@ is a number the registrar can question. The text-volume caps refuse the whole fi
 because a cell holding a megabyte of text is not a roster and truncating it would store
 a silently mangled child's name.
 """
+
 import codecs
 import csv
 import io
@@ -152,9 +153,7 @@ def _extension(filename: str) -> str:
 def _read_xlsx(content: bytes) -> tuple[list[tuple[int, list[object]]], bool]:
     """Stream the first worksheet, bounded by the row and column caps."""
     try:
-        book = openpyxl.load_workbook(
-            io.BytesIO(content), read_only=True, data_only=True
-        )
+        book = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     except Exception as exc:  # openpyxl raises a zoo of types for a bad archive
         raise UnreadableImportFile(
             "this .xlsx file could not be opened; it may be truncated, "

@@ -10,6 +10,7 @@ The type carries no database identity and no timestamps. It is the value the ser
 are unit-tested against with fake repositories, so nothing here imports sqlalchemy,
 fastapi or pydantic, and it must stay that way.
 """
+
 import math
 from dataclasses import dataclass
 
@@ -227,9 +228,7 @@ class SubjectGrade:
             term_code=term_code,
             class_section_id=class_section_id,
             class_code=class_code,
-            percentage=(
-                None if points is None else Percentage(points / checked_max * 100)
-            ),
+            percentage=(None if points is None else Percentage(points / checked_max * 100)),
             points=points,
             max_points=checked_max,
         )
@@ -249,9 +248,7 @@ def _checked(raw: float | None, field: str) -> float | None:
     if raw is None:
         return None
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        raise ValidationError(
-            f"{field} must be a number (got {type(raw).__name__})", field=field
-        )
+        raise ValidationError(f"{field} must be a number (got {type(raw).__name__})", field=field)
     number = float(raw)
     if not math.isfinite(number):
         raise ValidationError(

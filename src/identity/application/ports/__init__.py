@@ -5,6 +5,7 @@ underneath. That inversion is what keeps `application/services/` free of SQLAlch
 `httpx` and FastAPI, and it is what makes each service constructible in a test out of
 plain classes.
 """
+
 from identity.application.ports.directory import GuardianDirectory
 from identity.application.ports.messaging import WhatsAppGateway
 from identity.application.ports.repositories import (

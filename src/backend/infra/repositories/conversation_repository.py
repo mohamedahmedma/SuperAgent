@@ -11,6 +11,7 @@ message, because the one caller that did — a save that replaced the conversati
 its copy of it disagreed with the database — is how answers, and the images on them, went
 missing from conversations that were merely being continued.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -73,7 +74,9 @@ class SqlAlchemyConversationRepository:
             values["metadata_json"] = ChatSession.metadata_json.op("||", return_type=JSONB)(
                 bindparam("metadata_patch", value=dict(metadata), type_=JSONB)
             )
-        self._session.execute(update(ChatSession).where(ChatSession.id == session.id).values(**values))
+        self._session.execute(
+            update(ChatSession).where(ChatSession.id == session.id).values(**values)
+        )
 
     def add_messages(self, session: StoredSession, messages: Sequence[NewMessage]) -> Sequence[int]:
         if not messages:
@@ -88,27 +91,35 @@ class SqlAlchemyConversationRepository:
             row.client_key: row.id
             for row in self._session.execute(
                 pg_insert(ChatMessage)
-                .values([
-                    {
-                        "session_ref_id": session.id,
-                        "message_type": message.message_type,
-                        "content": message.content,
-                        "timestamp": message.timestamp,
-                        "rag_trace": message.rag_trace,
-                        "attachment_id": message.attachment_id,
-                        "client_key": key,
-                    }
-                    for message, key in zip(messages, keys)
-                ])
+                .values(
+                    [
+                        {
+                            "session_ref_id": session.id,
+                            "message_type": message.message_type,
+                            "content": message.content,
+                            "timestamp": message.timestamp,
+                            "rag_trace": message.rag_trace,
+                            "attachment_id": message.attachment_id,
+                            "client_key": key,
+                        }
+                        for message, key in zip(messages, keys)
+                    ]
+                )
                 .on_conflict_do_nothing(index_elements=[ChatMessage.client_key])
                 .returning(ChatMessage.id, ChatMessage.client_key)
             )
         }
         repeated = [key for key in keys if key not in inserted]
         if repeated:
-            inserted.update(self._session.execute(
-                select(ChatMessage.client_key, ChatMessage.id).where(ChatMessage.client_key.in_(repeated))
-            ).tuples().all())
+            inserted.update(
+                self._session.execute(
+                    select(ChatMessage.client_key, ChatMessage.id).where(
+                        ChatMessage.client_key.in_(repeated)
+                    )
+                )
+                .tuples()
+                .all()
+            )
         return [inserted[key] for key in keys]
 
     def messages(self, session: StoredSession) -> Sequence[StoredMessage]:
@@ -153,7 +164,9 @@ class SqlAlchemyConversationRepository:
             .order_by(ChatSession.updated_at.desc())
         ).all()
         return [
-            SessionSummary(row.session_id, dict(row.metadata_json or {}), row.updated_at, row.message_count)
+            SessionSummary(
+                row.session_id, dict(row.metadata_json or {}), row.updated_at, row.message_count
+            )
             for row in rows
         ]
 
@@ -179,7 +192,9 @@ class SqlAlchemyConversationRepository:
 
 
 def _session(row) -> StoredSession:
-    return StoredSession(id=row.id, session_id=row.session_id, metadata=dict(row.metadata_json or {}))
+    return StoredSession(
+        id=row.id, session_id=row.session_id, metadata=dict(row.metadata_json or {})
+    )
 
 
 def _message(row) -> StoredMessage:

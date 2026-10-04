@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 import redis
 
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 
 
 class RedisCache:

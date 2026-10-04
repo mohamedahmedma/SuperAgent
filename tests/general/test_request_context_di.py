@@ -1,7 +1,7 @@
-import asyncio
 import ast
-import inspect
+import asyncio
 import importlib.util
+import inspect
 import sys
 import types
 import unittest
@@ -61,7 +61,7 @@ class ChatRequestContextTests(unittest.IsolatedAsyncioTestCase):
 
 class KnowledgeToolFactoryTests(unittest.TestCase):
     def test_knowledge_tool_counter_is_per_context(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         budget = get_profile().agent.max_knowledge_calls_per_turn
         spent = [True] * budget + [False]
@@ -69,8 +69,12 @@ class KnowledgeToolFactoryTests(unittest.TestCase):
         ctx_b = ChatRequestContext.for_sync(user_id="b", session_id="s2")
 
         try:
-            self.assertEqual(spent, [ctx_a.acquire_knowledge_tool_slot() for _ in range(budget + 1)])
-            self.assertEqual(spent, [ctx_b.acquire_knowledge_tool_slot() for _ in range(budget + 1)])
+            self.assertEqual(
+                spent, [ctx_a.acquire_knowledge_tool_slot() for _ in range(budget + 1)]
+            )
+            self.assertEqual(
+                spent, [ctx_b.acquire_knowledge_tool_slot() for _ in range(budget + 1)]
+            )
         finally:
             ctx_a.close()
             ctx_b.close()
@@ -166,7 +170,9 @@ class ImportShapeTests(unittest.TestCase):
                     child_file = package_path / f"{alias.name}.py"
                     child_package = package_path / alias.name / "__init__.py"
                     if child_file.exists() or child_package.exists():
-                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno} {node.module}.{alias.name}")
+                        offenders.append(
+                            f"{path.relative_to(REPO_ROOT)}:{node.lineno} {node.module}.{alias.name}"
+                        )
 
         self.assertEqual([], offenders)
 

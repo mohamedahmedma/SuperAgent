@@ -16,6 +16,7 @@ compared against a naive `expires_at` raises `TypeError` — a 500 on every requ
 than a refusal. Everything written here is UTC, so reattaching is a restoration and not
 a guess. Nothing commits; the request's session boundary decides.
 """
+
 import logging
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -84,9 +85,7 @@ class SqlAlchemyApiKeyRepository:
         """
         try:
             self._session.execute(
-                update(models.ApiKey)
-                .where(models.ApiKey.prefix == prefix)
-                .values(last_used_at=at)
+                update(models.ApiKey).where(models.ApiKey.prefix == prefix).values(last_used_at=at)
             )
         except SQLAlchemyError:
             logger.warning("could not record last use of api key %s", prefix, exc_info=True)

@@ -3,23 +3,8 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
-from backend.assets.delivery import asset_url_path
-from backend.indexing.ingest_progress import IngestProgress
-from backend.api.deps import get_services
-from backend.api.resources import (
-    UPLOAD_DIR,
-    ensure_upload_dir,
-    is_supported_document,
-    save_upload_file,
-)
-from backend.agent.chat.language import ARABIC, ENGLISH
-from backend.composition import Services
-from backend.db.models import User
 import backend.indexing.language_check as language_check
-from backend.infra.auth import require_admin
-from backend.agent.profiles import get_profile
-from backend.text_matching import fold
-from backend.jobs import DELETE_STEPS
+from backend.agent.chat.language import ARABIC, ENGLISH
 from backend.agent.schemas import (
     AssetInfo,
     ChunkInfo,
@@ -36,6 +21,21 @@ from backend.agent.schemas import (
     DocumentUploadResponse,
     DocumentUploadStartResponse,
 )
+from backend.api.deps import get_services
+from backend.api.resources import (
+    UPLOAD_DIR,
+    ensure_upload_dir,
+    is_supported_document,
+    save_upload_file,
+)
+from backend.assets.delivery import asset_url_path
+from backend.composition import Services
+from backend.db.models import User
+from backend.indexing.ingest_progress import IngestProgress
+from backend.infra.auth import require_admin
+from backend.jobs import DELETE_STEPS
+from backend.profiles import get_profile
+from backend.text_matching import fold
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +64,14 @@ class _FigureProgress(IngestProgress):
     def figures_progress(self, done: int, total: int) -> None:
         percent = self.START + int((self.END - self.START) * done / total) if total else self.START
         self._jobs.update_step(
-            self._job_id, "parse", percent, "running",
+            self._job_id,
+            "parse",
+            percent,
+            "running",
             f"Extracting images: {done} of {total}",
-            sub_label="Extracting images", sub_done=done, sub_total=total,
+            sub_label="Extracting images",
+            sub_done=done,
+            sub_total=total,
         )
 
     def figures_finished(self, report) -> None:
@@ -98,12 +103,16 @@ def _process_upload_job(services: Services, job_id: str, file_path: str, filenam
         jobs.complete_step(job_id, "upload", "File saved to server")
 
         failed_step = "cleanup"
-        jobs.update_step(job_id, "cleanup", 10, "running", "Cleaning up old document with the same name")
+        jobs.update_step(
+            job_id, "cleanup", 10, "running", "Cleaning up old document with the same name"
+        )
         services.document_remover.remove(filename)
         jobs.complete_step(job_id, "cleanup", "Old version cleanup complete")
 
         failed_step = "parse"
-        jobs.update_step(job_id, "parse", 5, "running", "Parsing document and performing three-level chunking")
+        jobs.update_step(
+            job_id, "parse", 5, "running", "Parsing document and performing three-level chunking"
+        )
         # Extraction reports INTO `parse` rather than as a step of its own. It is part of
         # parsing, and a new step key would have to be added to the frontend store's
         # `createUploadSteps()` as well — `updateUploadStep` drops an unknown key with
@@ -116,7 +125,9 @@ def _process_upload_job(services: Services, job_id: str, file_path: str, filenam
         parent_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) in (1, 2)]
         leaf_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) == 3]
         if not leaf_docs:
-            raise ValueError("Document processing failed: no retrievable leaf chunks were generated")
+            raise ValueError(
+                "Document processing failed: no retrievable leaf chunks were generated"
+            )
         # Figure enrichment happens inside load_document, so its outcome is reported
         # here rather than as a separate job step — that keeps DELETE_STEPS/DEFAULT_STEPS
         # (and the progress UI built on them) unchanged.
@@ -159,7 +170,9 @@ def _process_upload_job(services: Services, job_id: str, file_path: str, filenam
             )
 
         services.milvus_writer.write_documents(leaf_docs, progress_callback=_on_vector_progress)
-        jobs.complete_step(job_id, "vector_store", f"Vectorization and storage complete: {total_leaf} leaf chunks")
+        jobs.complete_step(
+            job_id, "vector_store", f"Vectorization and storage complete: {total_leaf} leaf chunks"
+        )
         jobs.complete_job(job_id, f"Successfully uploaded and processed {filename}")
     except Exception as e:
         jobs.fail_job(job_id, failed_step, str(e))
@@ -205,7 +218,10 @@ def _process_pair_upload_job(
         parsed = []
         for index, (language, file_path, filename) in enumerate(sides, start=1):
             jobs.update_step(
-                job_id, "parse", round(index * 100 / (len(sides) + 1)), "running",
+                job_id,
+                "parse",
+                round(index * 100 / (len(sides) + 1)),
+                "running",
                 f"Parsing {filename} ({language})",
             )
             parsed.append(
@@ -222,7 +238,8 @@ def _process_pair_upload_job(
         if not leaf_total:
             raise ValueError("no retrievable leaf chunks were generated")
         jobs.complete_step(
-            job_id, "parse",
+            job_id,
+            "parse",
             f"Parsed {len(parsed)} file(s), {leaf_total} leaf chunks",
         )
 
@@ -257,8 +274,13 @@ def _process_pair_upload_job(
         failed_step = "vector_store"
         written = 0
         jobs.update_step(
-            job_id, "vector_store", 0, "running", f"Vectorizing and storing: 0 / {leaf_total}",
-            total_chunks=leaf_total, processed_chunks=0,
+            job_id,
+            "vector_store",
+            0,
+            "running",
+            f"Vectorizing and storing: 0 / {leaf_total}",
+            total_chunks=leaf_total,
+            processed_chunks=0,
         )
         for _, _, docs in parsed:
             leaves = [d for d in docs if int(d.get("chunk_level", 0) or 0) == 3]
@@ -266,9 +288,13 @@ def _process_pair_upload_job(
             def _on_progress(processed: int, _total: int, base: int = written) -> None:
                 done = base + processed
                 jobs.update_step(
-                    job_id, "vector_store", round(done * 100 / leaf_total), "running",
+                    job_id,
+                    "vector_store",
+                    round(done * 100 / leaf_total),
+                    "running",
                     f"Vectorizing and storing: {done} / {leaf_total}",
-                    total_chunks=leaf_total, processed_chunks=done,
+                    total_chunks=leaf_total,
+                    processed_chunks=done,
                 )
 
             services.milvus_writer.write_documents(leaves, progress_callback=_on_progress)
@@ -327,7 +353,6 @@ def _forget_corpus_languages() -> None:
 
 def _process_delete_job(services: Services, job_id: str, filename: str) -> None:
     jobs = services.delete_jobs
-    failed_step = "prepare"
     try:
         chunks_deleted = services.document_remover.remove(filename, jobs, job_id)
         # Clear the file off its pair row. Done HERE and not in
@@ -380,8 +405,15 @@ _CHUNK_PAGE_LIMIT = 2000
 #: What the inspector reads. `dense_embedding` and `sparse_embedding` are deliberately
 #: absent — they are most of a chunk's bytes and none of its meaning.
 _CHUNK_FIELDS = [
-    "chunk_id", "parent_chunk_id", "root_chunk_id", "chunk_level", "chunk_idx",
-    "page_number", "modality", "text", "asset_ids",
+    "chunk_id",
+    "parent_chunk_id",
+    "root_chunk_id",
+    "chunk_level",
+    "chunk_idx",
+    "page_number",
+    "modality",
+    "text",
+    "asset_ids",
 ]
 
 
@@ -505,12 +537,16 @@ async def upload_document_async(
     try:
         jobs.update_step(job["job_id"], "upload", 1, "running", "Saving file to server")
         await save_upload_file(file, file_path)
-        jobs.complete_step(job["job_id"], "upload", "File uploaded, waiting for background processing")
+        jobs.complete_step(
+            job["job_id"], "upload", "File uploaded, waiting for background processing"
+        )
     except Exception as e:
         jobs.fail_job(job["job_id"], "upload", f"Failed to save file: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
 
-    background_tasks.add_task(_process_upload_job, services, job["job_id"], str(file_path), filename)
+    background_tasks.add_task(
+        _process_upload_job, services, job["job_id"], str(file_path), filename
+    )
     return DocumentUploadStartResponse(
         job_id=job["job_id"],
         filename=filename,
@@ -538,14 +574,18 @@ async def upload_document_pair(
     sides = [(ARABIC, file_ar), (ENGLISH, file_en)]
     provided = [(language, upload) for language, upload in sides if upload and upload.filename]
     if not provided:
-        raise HTTPException(status_code=400, detail="Upload an Arabic file, an English file, or both")
+        raise HTTPException(
+            status_code=400, detail="Upload an Arabic file, an English file, or both"
+        )
 
     if pair_id and not document_pairs.get_pair(pair_id):
         raise HTTPException(status_code=404, detail=f"No document pair {pair_id}")
 
     for _language, upload in provided:
         if not is_supported_document(upload.filename or ""):
-            raise HTTPException(status_code=400, detail=get_profile().user_copy.unsupported_file_type)
+            raise HTTPException(
+                status_code=400, detail=get_profile().user_copy.unsupported_file_type
+            )
 
     # Both halves cannot be the same file: the row would claim one document as its own
     # translation, and pair_store would then detach it from one side as it attached the
@@ -567,7 +607,9 @@ async def upload_document_pair(
             await save_upload_file(upload, path)
             saved.append((language, str(path), upload.filename))
         jobs.complete_step(
-            job["job_id"], "upload", f"{len(saved)} file(s) uploaded, waiting for background processing"
+            job["job_id"],
+            "upload",
+            f"{len(saved)} file(s) uploaded, waiting for background processing",
         )
     except Exception as e:
         jobs.fail_job(job["job_id"], "upload", f"Failed to save file: {e}")
@@ -586,7 +628,9 @@ async def upload_document_pair(
 def _require_assets_enabled_for_review() -> None:
     """A deployment with assets off has no extractions to accept."""
     if not get_profile().assets.enabled:
-        raise HTTPException(status_code=404, detail="Asset support is disabled for this deployment.")
+        raise HTTPException(
+            status_code=404, detail="Asset support is disabled for this deployment."
+        )
 
 
 def _asset_info(dossier, chunk_ids_by_asset) -> AssetInfo:
@@ -755,8 +799,14 @@ async def list_document_pairs(
         claimed = {pair.filename_ar for pair in pairs} | {pair.filename_en for pair in pairs}
         unpaired = [
             DocumentPairInfo(
-                pair_id="", title=name, filename_ar="", filename_en=name,
-                paired=False, chunk_count_ar=0, chunk_count_en=count, unassigned=True,
+                pair_id="",
+                title=name,
+                filename_ar="",
+                filename_en=name,
+                paired=False,
+                chunk_count_ar=0,
+                chunk_count_en=count,
+                unassigned=True,
             )
             for name, count in sorted(counts.items())
             if name and name not in claimed
@@ -835,7 +885,9 @@ async def upload_document(
         if not filename:
             raise HTTPException(status_code=400, detail="Filename cannot be empty")
         if not is_supported_document(filename):
-            raise HTTPException(status_code=400, detail=get_profile().user_copy.unsupported_file_type)
+            raise HTTPException(
+                status_code=400, detail=get_profile().user_copy.unsupported_file_type
+            )
 
         ensure_upload_dir()
 
@@ -853,12 +905,17 @@ async def upload_document(
             raise HTTPException(status_code=500, detail=f"Document processing failed: {doc_err}")
 
         if not new_docs:
-            raise HTTPException(status_code=500, detail="Document processing failed: could not extract content")
+            raise HTTPException(
+                status_code=500, detail="Document processing failed: could not extract content"
+            )
 
         parent_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) in (1, 2)]
         leaf_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) == 3]
         if not leaf_docs:
-            raise HTTPException(status_code=500, detail="Document processing failed: no retrievable leaf chunks were generated")
+            raise HTTPException(
+                status_code=500,
+                detail="Document processing failed: no retrievable leaf chunks were generated",
+            )
 
         services.parent_chunks.upsert_documents(parent_docs)
         services.milvus_writer.write_documents(leaf_docs)

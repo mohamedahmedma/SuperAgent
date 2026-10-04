@@ -21,6 +21,7 @@ That is the point of the ports layer: "one bad row must not discard the good one
 rule about a use case, and a test that needs an engine, a migration and a temp file to
 assert it will be slow enough that nobody writes the other twenty cases.
 """
+
 import os
 import tempfile
 
@@ -30,12 +31,12 @@ _TEMPLATE_DB = os.path.join(_TMPDIR, "template.db")
 os.environ["SIS_DATABASE_URL"] = f"sqlite:///{_LIVE_DB}"
 
 import csv  # noqa: E402
-from hashlib import sha1  # noqa: E402
 import io  # noqa: E402
 import shutil  # noqa: E402
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence  # noqa: E402
 from dataclasses import replace  # noqa: E402
 from datetime import UTC, date, datetime  # noqa: E402
+from hashlib import sha1  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Any, Final, Protocol  # noqa: E402
 
@@ -43,6 +44,7 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from openpyxl import Workbook  # noqa: E402
 
+from sis import tenancy  # noqa: E402
 from sis.application.dto import ParseResult  # noqa: E402
 from sis.application.ports.repositories import (  # noqa: E402
     ClassSectionKey,
@@ -63,9 +65,9 @@ from sis.domain.guardians import (  # noqa: E402
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome  # noqa: E402
 from sis.domain.people import ClassEnrolment, Student  # noqa: E402
 from sis.domain.structure import (
-    School,  # noqa: E402
     AcademicYear,
     ClassSection,
+    School,  # noqa: E402
     Subject,
     Term,
     YearLevel,
@@ -80,7 +82,6 @@ from sis.domain.value_objects import (  # noqa: E402
     TermCode,
     YearCode,
 )
-from sis import tenancy  # noqa: E402
 from sis.infrastructure.db.session import reset_engine  # noqa: E402
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork  # noqa: E402
 
@@ -262,6 +263,7 @@ def reader_headers() -> dict[str, str]:
 NC = "NC"
 MD = "MD"
 
+
 @pytest.fixture()
 def two_databases(_migrated_template: str) -> Iterator[dict[str, str]]:
     """One migrated database per school, and the registry pointing at both.
@@ -283,11 +285,14 @@ def two_databases(_migrated_template: str) -> Iterator[dict[str, str]]:
         shutil.copyfile(_migrated_template, path)
         urls[code] = f"sqlite:///{path}"
 
-    previous = {name: os.environ.get(name) for name in (
-        tenancy.SCHOOLS_VAR,
-        f"{tenancy.DATABASE_URL_PREFIX}_{NC}",
-        f"{tenancy.DATABASE_URL_PREFIX}_{MD}",
-    )}
+    previous = {
+        name: os.environ.get(name)
+        for name in (
+            tenancy.SCHOOLS_VAR,
+            f"{tenancy.DATABASE_URL_PREFIX}_{NC}",
+            f"{tenancy.DATABASE_URL_PREFIX}_{MD}",
+        )
+    }
     os.environ[tenancy.SCHOOLS_VAR] = f"{NC},{MD}"
     os.environ[f"{tenancy.DATABASE_URL_PREFIX}_{NC}"] = urls[NC]
     os.environ[f"{tenancy.DATABASE_URL_PREFIX}_{MD}"] = urls[MD]
@@ -518,14 +523,10 @@ class FakeClassSectionRepository(_InMemory):
         self._ids.clear()
         self._ids.update(snapshot["ids"])
 
-    def get(
-        self, academic_year_code: AcademicYearCode, code: ClassCode
-    ) -> ClassSection | None:
+    def get(self, academic_year_code: AcademicYearCode, code: ClassCode) -> ClassSection | None:
         return self._rows.get((str(academic_year_code), str(code)))
 
-    def get_many(
-        self, keys: Collection[ClassSectionKey]
-    ) -> Mapping[ClassSectionKey, ClassSection]:
+    def get_many(self, keys: Collection[ClassSectionKey]) -> Mapping[ClassSectionKey, ClassSection]:
         wanted = {(str(year), str(code)) for year, code in keys}
         return {key: value for key, value in self._rows.items() if key in wanted}
 
@@ -545,9 +546,7 @@ class FakeClassSectionRepository(_InMemory):
         ]
         return sorted(found, key=lambda section: str(section.code))
 
-    def upsert_many(
-        self, sections: Sequence[ClassSection]
-    ) -> Mapping[ClassSectionKey, bool]:
+    def upsert_many(self, sections: Sequence[ClassSection]) -> Mapping[ClassSectionKey, bool]:
         return {section.identity: self._store(section) for section in sections}
 
     def rename(
@@ -568,9 +567,7 @@ class FakeClassSectionRepository(_InMemory):
         self._rows[key] = renamed
         return renamed
 
-    def ids_for(
-        self, keys: Collection[ClassSectionKey]
-    ) -> Mapping[ClassSectionKey, int]:
+    def ids_for(self, keys: Collection[ClassSectionKey]) -> Mapping[ClassSectionKey, int]:
         wanted = {(str(year), str(code)) for year, code in keys}
         return {key: value for key, value in self._ids.items() if key in wanted}
 
@@ -656,9 +653,7 @@ class FakeStudentRepository(_InMemory):
     def get(self, student_number: StudentNumber) -> Student | None:
         return self._rows.get(str(student_number))
 
-    def get_many(
-        self, student_numbers: Collection[StudentNumber]
-    ) -> Mapping[str, Student]:
+    def get_many(self, student_numbers: Collection[StudentNumber]) -> Mapping[str, Student]:
         wanted = {str(number) for number in student_numbers}
         return {key: value for key, value in self._rows.items() if key in wanted}
 
@@ -725,14 +720,10 @@ class FakeEnrolmentRepository(_InMemory):
         found = [e for e in self._rows.values() if str(e.student_number) == number]
         return sorted(found, key=lambda e: e.starts_on)
 
-    def class_section_on(
-        self, student_id: StudentNumber, on_date: date
-    ) -> ClassSection | None:
+    def class_section_on(self, student_id: StudentNumber, on_date: date) -> ClassSection | None:
         for enrolment in self._for(student_id):
             if enrolment.covers(on_date):
-                return self._sections.get(
-                    enrolment.academic_year_code, enrolment.class_code
-                )
+                return self._sections.get(enrolment.academic_year_code, enrolment.class_code)
         return None
 
     def class_sections_on(
@@ -786,9 +777,7 @@ class FakeEnrolmentRepository(_InMemory):
         self._rows[self._key(open_row)] = closed
         return closed
 
-    def upsert_many(
-        self, enrolments: Sequence[ClassEnrolment]
-    ) -> Mapping[EnrolmentKey, bool]:
+    def upsert_many(self, enrolments: Sequence[ClassEnrolment]) -> Mapping[EnrolmentKey, bool]:
         created: dict[EnrolmentKey, bool] = {}
         for enrolment in enrolments:
             key = self._key(enrolment)
@@ -818,9 +807,7 @@ class FakeGuardianRepository(_InMemory):
 
     def _owner_of(self, phone: object) -> Guardian | None:
         number = str(phone)
-        return next(
-            (g for g in self._rows.values() if g.reachable_on(number)), None
-        )
+        return next((g for g in self._rows.values() if g.reachable_on(number)), None)
 
     def get(self, phone: object) -> Guardian | None:
         return self._owner_of(phone)
@@ -876,9 +863,7 @@ class FakeGuardianRepository(_InMemory):
                 if str(phone) not in known:
                     phones.append(phone)
                     known.add(str(phone))
-            self._rows[existing.identity] = replace(
-                guardian, phones=tuple(phones)
-            )
+            self._rows[existing.identity] = replace(guardian, phones=tuple(phones))
         return created
 
     def all(self) -> tuple[Guardian, ...]:
@@ -905,9 +890,7 @@ class FakeStudentGuardianRepository(_InMemory):
     def list_for_student(self, student_number: object) -> Sequence[StudentGuardian]:
         number = str(student_number)
         found = [link for link in self._rows.values() if str(link.student_number) == number]
-        return tuple(
-            sorted(found, key=lambda l: (not l.is_primary_contact, str(l.guardian_phone)))
-        )
+        return tuple(sorted(found, key=lambda l: (not l.is_primary_contact, str(l.guardian_phone))))
 
     def list_for_students(
         self, student_numbers: Collection[object]
@@ -931,9 +914,7 @@ class FakeStudentGuardianRepository(_InMemory):
         ]
         return tuple(sorted(found, key=lambda l: str(l.student_number)))
 
-    def upsert_many(
-        self, links: Sequence[StudentGuardian]
-    ) -> Mapping[tuple[str, str], bool]:
+    def upsert_many(self, links: Sequence[StudentGuardian]) -> Mapping[tuple[str, str], bool]:
         created: dict[tuple[str, str], bool] = {}
         for link in links:
             key = link.identity
@@ -1041,9 +1022,7 @@ class FakeImportBatchRepository(_InMemory):
         rows = self._matching(batch_id, outcomes)
         return rows[offset:] if limit is None else rows[offset : offset + limit]
 
-    def count_rows(
-        self, batch_id: str, *, outcomes: Collection[RowOutcome] | None = None
-    ) -> int:
+    def count_rows(self, batch_id: str, *, outcomes: Collection[RowOutcome] | None = None) -> int:
         return len(self._matching(batch_id, outcomes))
 
     def _matching(
@@ -1062,11 +1041,7 @@ class FakeImportBatchRepository(_InMemory):
             self._rows[batch_id] = (batch, tuple(rows))
 
     def delete_expired(self, now: datetime) -> int:
-        stale = [
-            batch_id
-            for batch_id, (batch, _) in self._rows.items()
-            if batch.is_expired(now)
-        ]
+        stale = [batch_id for batch_id, (batch, _) in self._rows.items() if batch.is_expired(now)]
         for batch_id in stale:
             del self._rows[batch_id]
         return len(stale)
@@ -1262,7 +1237,13 @@ def seeded_fakes(fake_uow: FakeUnitOfWork) -> FakeUnitOfWork:
         ends_on=date(2026, 6, 30),
         is_current=True,
     )
-    level = YearLevel(code=YearCode("Y3"), school_code="MAIN", name_en="Year 3", name_ar="السنة الثالثة", display_order=3)
+    level = YearLevel(
+        code=YearCode("Y3"),
+        school_code="MAIN",
+        name_en="Year 3",
+        name_ar="السنة الثالثة",
+        display_order=3,
+    )
     sections = [
         ClassSection(
             code=ClassCode(code_text),

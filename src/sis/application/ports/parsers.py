@@ -27,6 +27,7 @@ being unreadable still leaves lines 1-13 and 15-200 importable. `UnreadableImpor
 is the single error a parser may raise, and it means the opposite thing: the file could
 not be opened at all, so there were never any rows to keep.
 """
+
 from typing import Protocol
 
 from sis.application.dto import (

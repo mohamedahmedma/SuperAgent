@@ -10,6 +10,7 @@ So these assertions are written from the client's side of the wire: what an
 `Access-Control-*` header set has to look like for a browser to honour it, not
 what the middleware was configured with.
 """
+
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -61,14 +62,13 @@ class CorsTests(unittest.TestCase):
 
         self.assertEqual(response.headers.get("access-control-allow-origin"), "*")
         self.assertNotEqual(
-            response.headers.get("access-control-allow-credentials"), "true",
+            response.headers.get("access-control-allow-credentials"),
+            "true",
             "the wildcard and credentialed mode cannot both be advertised",
         )
 
     def test_allowlist_echoes_permitted_origin_and_omits_others(self):
-        client = build_client(
-            CORS_ALLOW_ORIGINS="https://app.example.com, http://localhost:5173"
-        )
+        client = build_client(CORS_ALLOW_ORIGINS="https://app.example.com, http://localhost:5173")
 
         for origin in ("https://app.example.com", "http://localhost:5173"):
             with self.subTest(origin=origin):
@@ -79,9 +79,7 @@ class CorsTests(unittest.TestCase):
                         "Access-Control-Request-Method": "POST",
                     },
                 )
-                self.assertEqual(
-                    response.headers.get("access-control-allow-origin"), origin
-                )
+                self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
 
         denied = client.options(
             "/auth/login",
@@ -118,9 +116,7 @@ class CorsTests(unittest.TestCase):
         it nowhere else.
         """
         client = build_client(CORS_ALLOW_ORIGINS="https://app.example.com")
-        response = client.get(
-            "/documents", headers={"Origin": "https://app.example.com"}
-        )
+        response = client.get("/documents", headers={"Origin": "https://app.example.com"})
 
         exposed = response.headers.get("access-control-expose-headers", "")
         self.assertIn("ETag", [item.strip() for item in exposed.split(",")])

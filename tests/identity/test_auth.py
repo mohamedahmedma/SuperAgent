@@ -4,6 +4,7 @@ The guardian-binding tests are the ones that matter most: that claim is what the
 records facade trusts, so anything that lets it be set by the wrong party defeats
 every check downstream.
 """
+
 from identity.app import app
 
 
@@ -70,7 +71,9 @@ def test_refresh_returns_a_fresh_access_token(client, parent):
 def test_refresh_rotates_the_refresh_token(client, parent):
     """The token presented is spent; the one returned carries the session on."""
     tokens = client.post("/v1/auth/login", json=parent).json()
-    refreshed = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}).json()
+    refreshed = client.post(
+        "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+    ).json()
 
     assert refreshed["refresh_token"] and refreshed["refresh_token"] != tokens["refresh_token"]
     assert refreshed["refresh_expires_at"]
@@ -103,7 +106,9 @@ def test_a_spent_token_replayed_later_ends_the_whole_session(client, parent, db)
     """The stolen-copy case. Both the copy and the parent's live token are refused; the
     parent signs in again and the thief cannot."""
     tokens = client.post("/v1/auth/login", json=parent).json()
-    refreshed = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}).json()
+    refreshed = client.post(
+        "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+    ).json()
     _spend_long_ago(db, client, tokens["refresh_token"], seconds=120)
 
     replay = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
@@ -115,7 +120,9 @@ def test_a_spent_token_replayed_later_ends_the_whole_session(client, parent, db)
 
 def test_logout_revokes_every_token_of_the_session(client, parent):
     tokens = client.post("/v1/auth/login", json=parent).json()
-    refreshed = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}).json()
+    refreshed = client.post(
+        "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+    ).json()
 
     client.post("/v1/auth/logout", json={"refresh_token": refreshed["refresh_token"]})
 
@@ -133,7 +140,9 @@ def test_refresh_re_reads_the_binding_rather_than_copying_it(client, parent, adm
         json={"guardian_external_id": "G-99"},
     )
 
-    refreshed = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}).json()
+    refreshed = client.post(
+        "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+    ).json()
     assert decode_own_token(refreshed["access_token"])["guardian_id"] == "G-99"
 
 
@@ -141,7 +150,9 @@ def test_unbinding_revokes_existing_sessions(client, parent, admin_headers):
     """The urgent custody path: remove the binding and the session dies."""
     tokens = client.post("/v1/auth/login", json=parent).json()
 
-    client.delete(f"/v1/admin/accounts/{parent['username']}/guardian-binding", headers=admin_headers)
+    client.delete(
+        f"/v1/admin/accounts/{parent['username']}/guardian-binding", headers=admin_headers
+    )
 
     response = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
     assert response.status_code == 401

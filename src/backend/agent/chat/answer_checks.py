@@ -9,11 +9,12 @@ those checks put in an answer's place.
 Moved out of `service.py` with its behaviour unchanged. Copy is read from the active
 profile per call rather than captured at import.
 """
+
 import logging
 import re
 
 from backend.agent.chat.finalize import Finalizer
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 from backend.text_matching import name_key
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,11 @@ def terminal_reply(status: str, language: str) -> str:
     """The profile's own wording for an outcome the model does not need to compose."""
     from backend.agent.chat.turn_policy import localized
 
-    copy = get_profile().user_copy.retrieval_error if status == "retrieval_error" else get_profile().user_copy.no_knowledge
+    copy = (
+        get_profile().user_copy.retrieval_error
+        if status == "retrieval_error"
+        else get_profile().user_copy.no_knowledge
+    )
     return localized(copy, language)
 
 
@@ -66,9 +71,7 @@ def nothing_usable_reply(finalizer: Finalizer, turn_plan) -> str:
     )
     if not withheld:
         return ""
-    logger.warning(
-        "the model produced no answer channel this turn; serving the retry copy"
-    )
+    logger.warning("the model produced no answer channel this turn; serving the retry copy")
     return get_profile().user_copy.retrieval_error
 
 
@@ -152,9 +155,7 @@ def enforce_records_agreement(finalizer: Finalizer, ctx, turn_plan) -> str:
     phrases = getattr(get_profile().agent, "records_denial_phrases", None)
     if not _denies_the_records(ctx, finalizer.answer or "", phrases=phrases):
         return ""
-    logger.warning(
-        "the answer denies a record this turn retrieved; mode=%s", mode
-    )
+    logger.warning("the answer denies a record this turn retrieved; mode=%s", mode)
     return get_profile().user_copy.unverified_answer if mode == "enforce" else ""
 
 
@@ -189,9 +190,7 @@ def enforce_forced_tool_ran(finalizer: Finalizer, ctx, turn_plan) -> str:
     # does: a seeded result is the tool having run. `tool_outcomes` records both.
     if any(name == forced for name, _ in (getattr(ctx, "tool_outcomes", None) or [])):
         return ""
-    logger.warning(
-        "the turn required %s and no such tool ran; replacing the answer", forced
-    )
+    logger.warning("the turn required %s and no such tool ran; replacing the answer", forced)
     return get_profile().user_copy.unverified_answer
 
 
@@ -390,6 +389,7 @@ def enforce_answer_figures(finalizer: Finalizer, turn_plan, rag_trace) -> str:
         return ""
     logger.warning(
         "the answer states %s, which its evidence does not contain; mode=%s",
-        missing[:4], mode,
+        missing[:4],
+        mode,
     )
     return get_profile().user_copy.unverified_answer if mode == "enforce" else ""

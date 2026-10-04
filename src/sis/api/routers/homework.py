@@ -9,9 +9,9 @@ import uuid
 import zipfile
 from datetime import date, datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 from typing import Annotated
 from xml.etree import ElementTree as ET
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
@@ -77,7 +77,10 @@ def _teacher_only(caller: Principal) -> None:
     if caller.profile is None or not caller.profile.has_role("teacher"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "teacher_only", "message": "Homework publishing is available to teachers only."},
+            detail={
+                "code": "teacher_only",
+                "message": "Homework publishing is available to teachers only.",
+            },
         )
 
 
@@ -101,6 +104,7 @@ def _extract_docx(blob: bytes) -> str:
 def _extract_pdf(blob: bytes) -> str:
     try:
         from pypdf import PdfReader
+
         reader = PdfReader(io.BytesIO(blob))
         parts = []
         for page in reader.pages[:100]:
@@ -187,7 +191,10 @@ async def upload_homework(
     title = title.strip()
     details = details.strip()
     if not title:
-        raise HTTPException(422, detail={"code": "required", "field": "title", "message": "Homework title is required."})
+        raise HTTPException(
+            422,
+            detail={"code": "required", "field": "title", "message": "Homework title is required."},
+        )
 
     caller.narrow(
         Permission.GRADES_WRITE,
@@ -201,7 +208,10 @@ async def upload_homework(
     ):
         raise HTTPException(
             403,
-            detail={"code": "not_authorized", "message": "You may publish homework only for your own subject and class."},
+            detail={
+                "code": "not_authorized",
+                "message": "You may publish homework only for your own subject and class.",
+            },
         )
 
     file_id = str(uuid.uuid4())
@@ -220,14 +230,20 @@ async def upload_homework(
         if ext not in ALLOWED:
             raise HTTPException(
                 415,
-                detail={"code": "unsupported_file", "message": "Supported files: PDF, PNG, JPG, WEBP, DOCX and DOC."},
+                detail={
+                    "code": "unsupported_file",
+                    "message": "Supported files: PDF, PNG, JPG, WEBP, DOCX and DOC.",
+                },
             )
 
         blob = await attachment.read(MAX_BYTES + 1)
         if len(blob) > MAX_BYTES:
             raise HTTPException(
                 413,
-                detail={"code": "too_large", "message": "Homework attachment must be 20 MB or smaller."},
+                detail={
+                    "code": "too_large",
+                    "message": "Homework attachment must be 20 MB or smaller.",
+                },
             )
         if not blob:
             raise HTTPException(
@@ -237,7 +253,12 @@ async def upload_homework(
 
         size_bytes = len(blob)
         sha256 = hashlib.sha256(blob).hexdigest()
-        mime = attachment.content_type or ALLOWED[ext] or mimetypes.guess_type(original)[0] or "application/octet-stream"
+        mime = (
+            attachment.content_type
+            or ALLOWED[ext]
+            or mimetypes.guess_type(original)[0]
+            or "application/octet-stream"
+        )
         extracted = _extract(ext, blob)
 
         DATA_ROOT.mkdir(parents=True, exist_ok=True)
@@ -259,30 +280,41 @@ async def upload_homework(
                     ":id,:y,:c,:s,:t,:d,:o,:stored,:m,:size,:sha,:day,:at,:by,:x)"
                 ),
                 {
-                    "id": file_id, "y": academic_year, "c": class_code, "s": subject_code,
-                    "t": title, "d": details, "o": original,
+                    "id": file_id,
+                    "y": academic_year,
+                    "c": class_code,
+                    "s": subject_code,
+                    "t": title,
+                    "d": details,
+                    "o": original,
                     "stored": stored.name if stored is not None else None,
-                    "m": mime, "size": size_bytes, "sha": sha256,
-                    "day": now.date().isoformat(), "at": now.isoformat(), "by": caller.username,
+                    "m": mime,
+                    "size": size_bytes,
+                    "sha": sha256,
+                    "day": now.date().isoformat(),
+                    "at": now.isoformat(),
+                    "by": caller.username,
                     "x": extracted,
                 },
             )
-            uow._session.add(m.AuditLog(
-                actor_user_id=caller.profile.user_id if caller.profile else None,
-                actor=caller.username,
-                action="homework_uploaded",
-                entity_type="Homework",
-                entity_id=file_id,
-                old_values=None,
-                new_values={
-                    "academic_year_code": academic_year,
-                    "class_code": class_code,
-                    "subject_code": subject_code,
-                    "title": title,
-                    "details": details,
-                    "original_filename": original,
-                },
-            ))
+            uow._session.add(
+                m.AuditLog(
+                    actor_user_id=caller.profile.user_id if caller.profile else None,
+                    actor=caller.username,
+                    action="homework_uploaded",
+                    entity_type="Homework",
+                    entity_id=file_id,
+                    old_values=None,
+                    new_values={
+                        "academic_year_code": academic_year,
+                        "class_code": class_code,
+                        "subject_code": subject_code,
+                        "title": title,
+                        "details": details,
+                        "original_filename": original,
+                    },
+                )
+            )
             uow.commit()
             row = uow._session.execute(
                 text("SELECT * FROM teacher_homework WHERE id=:id"), {"id": file_id}
@@ -303,26 +335,40 @@ def delete_homework(
     _teacher_only(caller)
     with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
         row = uow._session.execute(
-            text("SELECT * FROM teacher_homework WHERE id=:id AND deleted_at IS NULL"), {"id": homework_id}
+            text("SELECT * FROM teacher_homework WHERE id=:id AND deleted_at IS NULL"),
+            {"id": homework_id},
         ).first()
         if row is None:
-            raise HTTPException(404, detail={"code": "not_found", "message": "Homework item not found."})
+            raise HTTPException(
+                404, detail={"code": "not_found", "message": "Homework item not found."}
+            )
         if row._mapping["uploaded_by"] != caller.username:
-            raise HTTPException(403, detail={"code": "not_authorized", "message": "You may delete only homework you uploaded."})
+            raise HTTPException(
+                403,
+                detail={
+                    "code": "not_authorized",
+                    "message": "You may delete only homework you uploaded.",
+                },
+            )
         uow._session.execute(
             text("UPDATE teacher_homework SET deleted_at=:now WHERE id=:id"),
             {"id": homework_id, "now": datetime.now(ZoneInfo("Africa/Cairo")).isoformat()},
         )
         values = _audit_values(row)
-        uow._session.add(m.AuditLog(
-            actor_user_id=caller.profile.user_id if caller.profile else None,
-            actor=caller.username,
-            action="homework_deleted",
-            entity_type="Homework",
-            entity_id=homework_id,
-            old_values=values,
-            new_values={**values, "deleted_at": datetime.now(ZoneInfo("Africa/Cairo")).isoformat()},
-        ))
+        uow._session.add(
+            m.AuditLog(
+                actor_user_id=caller.profile.user_id if caller.profile else None,
+                actor=caller.username,
+                action="homework_deleted",
+                entity_type="Homework",
+                entity_id=homework_id,
+                old_values=values,
+                new_values={
+                    **values,
+                    "deleted_at": datetime.now(ZoneInfo("Africa/Cairo")).isoformat(),
+                },
+            )
+        )
         uow.commit()
     return None
 
@@ -340,21 +386,25 @@ def restore_homework(
             {"id": homework_id},
         ).first()
         if row is None:
-            raise HTTPException(404, detail={"code": "not_found", "message": "Archived homework item not found."})
+            raise HTTPException(
+                404, detail={"code": "not_found", "message": "Archived homework item not found."}
+            )
         uow._session.execute(
             text("UPDATE teacher_homework SET deleted_at=NULL WHERE id=:id"),
             {"id": homework_id},
         )
         values = _audit_values(row)
-        uow._session.add(m.AuditLog(
-            actor_user_id=caller.profile.user_id if caller.profile else None,
-            actor=caller.username,
-            action="homework_restored",
-            entity_type="Homework",
-            entity_id=homework_id,
-            old_values=values,
-            new_values={**values, "deleted_at": None},
-        ))
+        uow._session.add(
+            m.AuditLog(
+                actor_user_id=caller.profile.user_id if caller.profile else None,
+                actor=caller.username,
+                action="homework_restored",
+                entity_type="Homework",
+                entity_id=homework_id,
+                old_values=values,
+                new_values={**values, "deleted_at": None},
+            )
+        )
         uow.commit()
         restored = uow._session.execute(
             text("SELECT * FROM teacher_homework WHERE id=:id"), {"id": homework_id}
@@ -372,18 +422,22 @@ def homework_for_student(
     # The parent-facing service resolves the guardian/student relationship before asking SIS.
     with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
         session = uow._session
-        classes = session.execute(
-            text(
-                "SELECT DISTINCT cs.code "
-                "FROM students s "
-                "JOIN class_enrolments e ON e.student_id=s.id "
-                "JOIN class_sections cs ON cs.id=e.class_section_id "
-                "WHERE s.student_number=:n "
-                "AND date(e.starts_on)<=date(:d) "
-                "AND (e.ends_on IS NULL OR date(e.ends_on)>=date(:d))"
-            ),
-            {"n": student_number, "d": on_date.isoformat()},
-        ).scalars().all()
+        classes = (
+            session.execute(
+                text(
+                    "SELECT DISTINCT cs.code "
+                    "FROM students s "
+                    "JOIN class_enrolments e ON e.student_id=s.id "
+                    "JOIN class_sections cs ON cs.id=e.class_section_id "
+                    "WHERE s.student_number=:n "
+                    "AND date(e.starts_on)<=date(:d) "
+                    "AND (e.ends_on IS NULL OR date(e.ends_on)>=date(:d))"
+                ),
+                {"n": student_number, "d": on_date.isoformat()},
+            )
+            .scalars()
+            .all()
+        )
 
         rows = []
         if classes:
@@ -406,6 +460,7 @@ def homework_for_student(
         assignments=[_row(r) for r in rows],
     )
 
+
 @router.get("/{homework_id}/file")
 def download_homework_file(
     homework_id: str,
@@ -414,10 +469,13 @@ def download_homework_file(
 ):
     with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
         row = uow._session.execute(
-            text("SELECT * FROM teacher_homework WHERE id=:id AND deleted_at IS NULL"), {"id": homework_id}
+            text("SELECT * FROM teacher_homework WHERE id=:id AND deleted_at IS NULL"),
+            {"id": homework_id},
         ).first()
     if row is None:
-        raise HTTPException(404, detail={"code": "not_found", "message": "Homework item not found."})
+        raise HTTPException(
+            404, detail={"code": "not_found", "message": "Homework item not found."}
+        )
     m = row._mapping
     # Holding grades.read somewhere does not make every classroom's documents visible.
     # The same scope boundary used for a marksheet also protects its attachment.
@@ -435,5 +493,7 @@ def download_homework_file(
         )
     path = DATA_ROOT / stored_filename
     if not path.is_file():
-        raise HTTPException(404, detail={"code": "file_missing", "message": "Homework file is no longer available."})
+        raise HTTPException(
+            404, detail={"code": "file_missing", "message": "Homework file is no longer available."}
+        )
     return FileResponse(path, media_type=m["mime_type"], filename=m["original_filename"])

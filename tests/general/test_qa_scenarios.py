@@ -11,15 +11,16 @@ not allowed to turn a user away. So the asymmetric cases below assert admission 
 often than refusal, and the refusal cases are limited to subjects with no relation to
 the corpus at all.
 """
+
 import unittest
 
 from backend.agent.chat.signals import RequestSignals, Scope, SignalContext, build_ladder
 from backend.agent.chat.turn_policy import resolve_turn
-from backend.agent.profiles import get_profile
-from backend.agent.profiles.registry import load_profile
 from backend.agent.rag.evidence import Certainty
 from backend.agent.rag.scope_detector import CatalogueScopeDetector, index_store
 from backend.agent.rag.scope_index import build_index
+from backend.profiles import get_profile
+from backend.profiles.registry import load_profile
 from tests.general.integration_support import (
     requires_embedder,
     requires_llm,
@@ -105,9 +106,7 @@ class ScopeIndexHealthTests(unittest.TestCase):
     def test_the_vectors_have_the_configured_width(self):
         import os
 
-        self.assertEqual(
-            int(os.getenv("DENSE_EMBEDDING_DIM", "1024")), self.index.vectors.shape[1]
-        )
+        self.assertEqual(int(os.getenv("DENSE_EMBEDDING_DIM", "1024")), self.index.vectors.shape[1])
 
     def test_the_floor_is_in_range(self):
         """A floor at or above 1.0 would escalate everything; below 0 admits everything."""
@@ -115,8 +114,10 @@ class ScopeIndexHealthTests(unittest.TestCase):
         self.assertLess(self.index.floor, 1.0)
 
     def test_the_index_carries_a_corpus_description(self):
-        self.assertTrue(self.index.catalogue.strip(),
-                        "the scope prompt would describe the corpus as nothing at all")
+        self.assertTrue(
+            self.index.catalogue.strip(),
+            "the scope prompt would describe the corpus as nothing at all",
+        )
 
     def test_the_floor_fingerprint_is_recorded(self):
         self.assertTrue(self.index.floor_sha256)
@@ -174,7 +175,7 @@ class ScopeGateRecallTests(unittest.TestCase):
         reached in production today. That is a real fact about the deployment and it
         belongs in exactly one assertion — not spread across every test in the class as
         an abstention nobody reads as configuration."""
-        self.assertIn(getattr(self.profile.rag, "scope_index_enabled"), (True, False))
+        self.assertIn(self.profile.rag.scope_index_enabled, (True, False))
         if not self.profile.rag.scope_index_enabled:
             signals = RequestSignals(question=IN_DOMAIN[0])
             shipped = LadderConfig(self.profile.agent, self.profile.rag)
@@ -198,7 +199,8 @@ class ScopeGateRecallTests(unittest.TestCase):
                 signals = self.judge(question)
                 if signals is not None and signals.scope is Scope.OUT_OF_DOMAIN:
                     self.assertLess(
-                        signals.scope_certainty, Certainty.HIGH,
+                        signals.scope_certainty,
+                        Certainty.HIGH,
                         "rung 1 produced a refusal that could end a turn",
                     )
 
@@ -304,9 +306,7 @@ class TurnPolicyTests(unittest.TestCase):
         self.assertTrue(str(plan.static_reply).strip(), "a refusal with nothing to say")
 
     def test_disclosed_personal_data_is_captured_even_when_off_topic(self):
-        plan = self.plan_for(
-            Scope.OUT_OF_DOMAIN, Certainty.HIGH, personal_data=["child_name"]
-        )
+        plan = self.plan_for(Scope.OUT_OF_DOMAIN, Certainty.HIGH, personal_data=["child_name"])
         self.assertTrue(plan.capture_user_info)
 
     def test_planning_never_raises_on_an_empty_signal_set(self):
@@ -330,15 +330,18 @@ class ScopePromptTests(unittest.TestCase):
 
     def render(self, question="when does term two start"):
         from backend.indexing.embedding import embed_query
-        from backend.agent.prompts import render
+        from backend.prompts import render
 
         matches = self.index.best_matches(embed_query(question), limit=3)
         return render(
             "rag/scope_check.j2",
             question=question,
             matches=[
-                {"question": m.question, "score": m.score,
-                 "above_floor": m.score >= self.index.floor}
+                {
+                    "question": m.question,
+                    "score": m.score,
+                    "above_floor": m.score >= self.index.floor,
+                }
                 for m in matches
             ],
             catalogue=self.index.catalogue,
@@ -437,9 +440,7 @@ class SignalLadderTests(unittest.TestCase):
         return build_ladder(self._config())
 
     def context(self, question, history=()):
-        return SignalContext(
-            question=question, history=list(history), config=self._config()
-        )
+        return SignalContext(question=question, history=list(history), config=self._config())
 
     def test_the_ladder_reaches_a_conclusion_for_an_in_domain_question(self):
         signals = self.ladder().run(self.context(IN_DOMAIN[0]))

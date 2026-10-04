@@ -4,6 +4,7 @@ Three clients to one service — marks, guardian links, calendar — sharing one
 transport in `http.py` so they cannot disagree about the pool size, the timeout policy,
 or the two rules that must never differ: no retries, and no redirects.
 """
+
 from records.adapters.sis.calendar import SisSchoolCalendar
 from records.adapters.sis.directory import SisGuardianDirectory
 from records.adapters.sis.grades import SisAdapter

@@ -23,6 +23,7 @@ staff. None of them is here, and that is the point: the projection is the privac
 not a filter somebody downstream has to remember to apply. A parent needs to know who
 teaches their child, not how to reach a member of staff directly.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -67,6 +67,7 @@ This is a workaround for somebody else's bug and it is written to be deleted. Wh
 endpoint parses its own format on this path, `test_provider_compat.py` starts failing on
 the case that pins the broken behaviour, and that is the signal to remove this file.
 """
+
 from __future__ import annotations
 
 import logging
@@ -194,7 +195,11 @@ def _tool_calls(message: Any) -> List[Dict[str, Any]]:
 
 
 def _is_tool_call(message: Any) -> bool:
-    return isinstance(message, dict) and message.get("role") == "assistant" and bool(_tool_calls(message))
+    return (
+        isinstance(message, dict)
+        and message.get("role") == "assistant"
+        and bool(_tool_calls(message))
+    )
 
 
 def _is_tool_result(message: Any) -> bool:

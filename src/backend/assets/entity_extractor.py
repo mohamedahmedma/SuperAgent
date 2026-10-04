@@ -9,11 +9,11 @@ The structured-output schema is generated from the profile's attribute vocabular
 runtime, so this module contains no knowledge of shoes, colours, or prices. Point it
 at a different `attributes:` block and it extracts a different domain.
 """
+
 from __future__ import annotations
 
 import base64
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
@@ -22,7 +22,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.assets.attributes import AttributeSchema
 from backend.assets.dossier import (
     AssetRole,
-    AssetTier,
     ExtractionPayload,
     Provenance,
     StructuredSurface,
@@ -31,6 +30,7 @@ from backend.assets.dossier import (
 from backend.assets.extractors import ExtractionRequest, FigureExtractor, downscale_image
 
 logger = logging.getLogger(__name__)
+
 
 class _EntityCore(BaseModel):
     """The non-attribute half of an entity extraction; the attribute half is
@@ -91,8 +91,15 @@ class VisionEntityExtractor(FigureExtractor):
 
     name = "entity_vision"
 
-    def __init__(self, entities_config, schema: AttributeSchema, model_id: str,
-                 api_key: str, base_url: str, figures_config=None):
+    def __init__(
+        self,
+        entities_config,
+        schema: AttributeSchema,
+        model_id: str,
+        api_key: str,
+        base_url: str,
+        figures_config=None,
+    ):
         self._config = entities_config
         self._schema = schema
         self._model_id = model_id
@@ -130,7 +137,7 @@ class VisionEntityExtractor(FigureExtractor):
         return "\n".join(parts) or "(no surrounding text)"
 
     def extract(self, request: ExtractionRequest) -> ExtractionPayload:
-        from backend.agent.prompts import resolve as resolve_prompt
+        from backend.prompts import resolve as resolve_prompt
 
         prompt = resolve_prompt(
             self._config.extraction_prompt,
@@ -145,8 +152,12 @@ class VisionEntityExtractor(FigureExtractor):
             "role": "user",
             "content": [
                 {"type": "text", "text": prompt},
-                {"type": "image_url",
-                 "image_url": {"url": f"data:{request.content_type or 'image/png'};base64,{encoded}"}},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{request.content_type or 'image/png'};base64,{encoded}"
+                    },
+                },
             ],
         }
         from backend.assets.vision import invoke_structured
@@ -201,14 +212,16 @@ def _attributes_as_text(attributes: Dict[str, Any]) -> str:
 def _attribute_tags(attributes: Dict[str, Any], limit: int = 10) -> List[str]:
     tags: List[str] = []
     for value in attributes.values():
-        for item in (value if isinstance(value, list) else [value]):
+        for item in value if isinstance(value, list) else [value]:
             text = str(item).strip()
             if text and text not in tags and not text.replace(".", "", 1).isdigit():
                 tags.append(text)
     return tags[:limit]
 
 
-def build_entity_extractor(entities_config, schema: AttributeSchema, figures_config=None) -> FigureExtractor:
+def build_entity_extractor(
+    entities_config, schema: AttributeSchema, figures_config=None
+) -> FigureExtractor:
     """Vision extractor when configured and the vocabulary is non-empty, else the
     heuristic one. An empty vocabulary means there is nothing for vision to fill in."""
     if not entities_config.vision_enabled or not schema:
@@ -226,8 +239,10 @@ def build_entity_extractor(entities_config, schema: AttributeSchema, figures_con
         return HeuristicEntityExtractor(entities_config, schema)
 
     return VisionEntityExtractor(
-        entities_config, schema,
-        model_id=credentials.model_id, api_key=credentials.api_key,
+        entities_config,
+        schema,
+        model_id=credentials.model_id,
+        api_key=credentials.api_key,
         base_url=credentials.base_url,
         figures_config=figures_config,
     )

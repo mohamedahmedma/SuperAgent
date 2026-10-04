@@ -33,8 +33,9 @@ tell "you already put something there" from "that is not a day".
 Attendance is not touched anywhere in this module. A timetable is a plan; the register is a
 record of what happened, and connecting them is not this stage.
 """
+
 from datetime import time
-from typing import Annotated, Protocol
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -46,7 +47,6 @@ from sis.api.deps import (
     get_timetable_service,
     require_permission,
 )
-from sis.domain.rbac import Permission, RoleCode
 from sis.api.routers import domain_errors, error_responses
 from sis.application.services import (
     QueryService,
@@ -54,6 +54,7 @@ from sis.application.services import (
     TimetableService,
     WeekPlan,
 )
+from sis.domain.rbac import Permission, RoleCode
 from sis.domain.timetable import (
     MAX_PERIODS_PER_DAY,
     TimetableEntry,
@@ -214,6 +215,7 @@ class TimetableTermCopyIn(BaseModel):
     source_term_code: str = Field(examples=["2025-2026-T1"])
     target_term_code: str = Field(examples=["2025-2026-T2"])
 
+
 class GradeBreakIn(BaseModel):
     academic_year_code: str
     year_level_code: str
@@ -373,9 +375,7 @@ class StudentWeekOut(BaseModel):
         section = week.class_section
         plan = week.plan
         if plan is None or section is None:
-            return cls(
-                student_number=week.student_number, term_code=week.term_code
-            )
+            return cls(student_number=week.student_number, term_code=week.term_code)
         return cls(
             student_number=week.student_number,
             term_code=week.term_code,
@@ -389,9 +389,7 @@ class StudentWeekOut(BaseModel):
                 StudentLessonOut(
                     day_of_week=str(entry.slot.day_of_week),
                     period_number=entry.slot.period_number,
-                    subject_code=(
-                        None if entry.subject_code is None else str(entry.subject_code)
-                    ),
+                    subject_code=(None if entry.subject_code is None else str(entry.subject_code)),
                     subject_name_ar=(
                         week.subjects[str(entry.subject_code)].name_ar
                         if str(entry.subject_code) in week.subjects
@@ -455,16 +453,16 @@ def set_timetable_periods(
     caller: Registrar,
 ) -> list[TimetablePeriodOut]:
     if caller.profile is not None and not (
-        caller.profile.is_system_admin
-        or caller.profile.has_role(RoleCode.SCHOOL_MANAGER.value)
+        caller.profile.is_system_admin or caller.profile.has_role(RoleCode.SCHOOL_MANAGER.value)
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "manager_required", "message": "Only the school manager can change the number of periods."},
+            detail={
+                "code": "manager_required",
+                "message": "Only the school manager can change the number of periods.",
+            },
         )
-    caller.narrow(
-        Permission.TIMETABLE_WRITE, lambda scopes: scopes.for_school(school_code)
-    )
+    caller.narrow(Permission.TIMETABLE_WRITE, lambda scopes: scopes.for_school(school_code))
     with domain_errors():
         stored = timetables.set_periods(
             SchoolCode(school_code),
@@ -486,6 +484,7 @@ def set_timetable_periods(
 
 # -- The lessons ------------------------------------------------------------
 
+
 @router.put("/timetable/break", status_code=204)
 def set_grade_break(body: GradeBreakIn, timetables: Timetables, caller: Registrar) -> None:
     caller.narrow(
@@ -495,7 +494,12 @@ def set_grade_break(body: GradeBreakIn, timetables: Timetables, caller: Registra
         ),
     )
     with domain_errors():
-        timetables.set_break_for_level(AcademicYearCode(body.academic_year_code), YearCode(body.year_level_code), body.period_number, body.break_duration_minutes)
+        timetables.set_break_for_level(
+            AcademicYearCode(body.academic_year_code),
+            YearCode(body.year_level_code),
+            body.period_number,
+            body.break_duration_minutes,
+        )
 
 
 @router.get(
@@ -519,9 +523,7 @@ def read_week(
 ) -> WeekPlanOut:
     caller.narrow(
         Permission.TIMETABLE_READ,
-        lambda scopes: scopes.for_class(
-            academic_year_code=academic_year, class_code=class_code
-        ),
+        lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code),
     )
     with domain_errors():
         plan = timetables.week_for_class(
@@ -579,9 +581,7 @@ def read_guardian_student_week(
             actor=caller.prefix,
             request_id=request_id,
         )
-        week = timetables.week_for_student(
-            StudentNumber(student_number), TermCode(term)
-        )
+        week = timetables.week_for_student(StudentNumber(student_number), TermCode(term))
     return StudentWeekOut.of(week)
 
 
@@ -615,9 +615,7 @@ def list_timetable(
     # narrowing is the same shape as the subject and student listings: the more the query
     # names, the more grants can match it.
     if year_level is None:
-        caller.narrow(
-            Permission.TIMETABLE_READ, lambda scopes: scopes.for_year(academic_year)
-        )
+        caller.narrow(Permission.TIMETABLE_READ, lambda scopes: scopes.for_year(academic_year))
     else:
         caller.narrow(
             Permission.TIMETABLE_READ,
@@ -662,9 +660,7 @@ def place_lessons(
     caller.narrow_all(
         Permission.TIMETABLE_WRITE,
         lambda scopes: [
-            scopes.for_class(
-                academic_year_code=body.academic_year_code, class_code=code
-            )
+            scopes.for_class(academic_year_code=body.academic_year_code, class_code=code)
             for code in {entry.class_code for entry in body.entries}
         ],
     )
@@ -707,9 +703,7 @@ def save_week_changes(
     caller.narrow_all(
         Permission.TIMETABLE_WRITE,
         lambda scopes: [
-            scopes.for_class(
-                academic_year_code=body.academic_year_code, class_code=code
-            )
+            scopes.for_class(academic_year_code=body.academic_year_code, class_code=code)
             for code in class_codes
         ],
     )
@@ -757,9 +751,7 @@ def copy_term_week(
     caller.narrow_all(
         Permission.TIMETABLE_WRITE,
         lambda scopes: [
-            scopes.for_class(
-                academic_year_code=body.academic_year_code, class_code=body.class_code
-            )
+            scopes.for_class(academic_year_code=body.academic_year_code, class_code=body.class_code)
         ],
     )
     with domain_errors():
@@ -778,23 +770,19 @@ def copy_term_week(
     status_code=status.HTTP_200_OK,
     summary="Empty slots",
     description="Removes the lessons in these slots and answers how many there were.\n\n"
-    "Not the same as placing a lesson with no subject. That states \"this class has this "
-    "period free\"; this states \"nobody has planned this slot\". Both are real, and a "
+    'Not the same as placing a lesson with no subject. That states "this class has this '
+    'period free"; this states "nobody has planned this slot". Both are real, and a '
     "registrar has to be able to say which one they mean.\n\n"
     "A POST rather than a DELETE because it carries a body of slots — a DELETE with a "
     "request body is permitted but is dropped by enough proxies to be a poor bet for a "
     "route that silently doing nothing is indistinguishable from succeeding on.",
     responses=error_responses(401, 403, 404, 422),
 )
-def clear_slots(
-    body: TimetableSlotsIn, timetables: Timetables, caller: Registrar
-) -> ClearedOut:
+def clear_slots(body: TimetableSlotsIn, timetables: Timetables, caller: Registrar) -> ClearedOut:
     caller.narrow_all(
         Permission.TIMETABLE_WRITE,
         lambda scopes: [
-            scopes.for_class(
-                academic_year_code=body.academic_year_code, class_code=code
-            )
+            scopes.for_class(academic_year_code=body.academic_year_code, class_code=code)
             for code in {slot.class_code for slot in body.slots}
         ],
     )

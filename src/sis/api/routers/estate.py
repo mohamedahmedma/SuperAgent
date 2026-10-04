@@ -30,6 +30,7 @@ more than one worker, treat provisioning as complete only after a rolling restar
 alternative would be a shared cache invalidation across workers, which is a much larger
 mechanism than the once-a-term operation it would serve.
 """
+
 import os
 
 from fastapi import APIRouter, HTTPException, status
@@ -88,9 +89,7 @@ class ProvisionSchoolOut(BaseModel):
     ),
     responses=error_responses(401, 403, 409, 422, 503),
 )
-def provision_school(
-    body: ProvisionSchoolIn, caller: RegistrarCaller
-) -> ProvisionSchoolOut:
+def provision_school(body: ProvisionSchoolIn, caller: RegistrarCaller) -> ProvisionSchoolOut:
     template = os.getenv(TEMPLATE_VAR, "").strip()
     admin_url = os.getenv(ADMIN_URL_VAR, "").strip()
     if not template or not admin_url:

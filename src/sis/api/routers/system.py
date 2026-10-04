@@ -1,4 +1,5 @@
 """System Administrator controls: estate status and maintenance windows."""
+
 from __future__ import annotations
 
 from datetime import datetime

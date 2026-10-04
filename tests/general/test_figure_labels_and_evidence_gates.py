@@ -24,16 +24,17 @@ The last class covers a different bug with the same cause as the first: `name_ke
 ى onto ي, which is what makes «ليلي» find «ليلى» and also what makes the preposition على
 indistinguishable from the name علي.
 """
+
 import re
 import unittest
 from pathlib import Path
 
-from backend.assets.dossier import DOSSIER_VERSION, MIGRATIONS
 from backend.agent.chat.signals import _names_the_child
+from backend.assets.dossier import DOSSIER_VERSION, MIGRATIONS
 from backend.indexing.document_loader import DocumentLoader
-from backend.agent.prompts import render as render_prompt
+from backend.prompts import render as render_prompt
 
-TEMPLATES = Path("src/backend/agent/prompts/templates")
+TEMPLATES = Path("src/backend/prompts/templates")
 
 
 def _template(name: str) -> str:
@@ -63,16 +64,20 @@ class AFigureIsDividedButNeverOrphaned(unittest.TestCase):
         self.loader = DocumentLoader()
 
     def _figure_unit(self, text: str) -> dict:
-        return {"kind": "figure", "text": text, "sections": ("Handbook", "Uniform"),
-                "page": 0, "asset_ids": ("kb.docx::p0::imgabc123456789",)}
+        return {
+            "kind": "figure",
+            "text": text,
+            "sections": ("Handbook", "Uniform"),
+            "page": 0,
+            "asset_ids": ("kb.docx::p0::imgabc123456789",),
+        }
 
     def _parts(self, transcription: str = "") -> dict:
         return {
             "header": "[Figure] Day Wear: Secondary School - Girls",
             "description": "An infographic illustrating the school uniform. " * 30,
-            "transcription": transcription or (
-                "White Shirt (long sleeves) Navy Blue Blazer Navy Blue Pleated Skirt " * 10
-            ),
+            "transcription": transcription
+            or ("White Shirt (long sleeves) Navy Blue Blazer Navy Blue Pleated Skirt " * 10),
             "summary": (
                 "Tags: School Uniform, Girls, Secondary, Day Wear, Blazer\n"
                 "Answers: What is the uniform for secondary girls? What colour is the blazer?"
@@ -82,13 +87,21 @@ class AFigureIsDividedButNeverOrphaned(unittest.TestCase):
     def _blocks(self, parts: dict, asset_id: str = "kb.docx::p0::imgabc123456789") -> list:
         return [
             {"type": "heading", "content": "School uniform", "level": 3, "page_number": 0},
-            {"type": "text", "content": "the joined surrogate", "page_number": 0,
-             "asset_ids": [asset_id], "figure": parts},
+            {
+                "type": "text",
+                "content": "the joined surrogate",
+                "page_number": 0,
+                "asset_ids": [asset_id],
+                "figure": parts,
+            },
         ]
 
     def _figure_units(self, parts: dict) -> list:
-        return [unit for unit in self.loader._blocks_to_units(self._blocks(parts))
-                if unit["kind"] == "figure"]
+        return [
+            unit
+            for unit in self.loader._blocks_to_units(self._blocks(parts))
+            if unit["kind"] == "figure"
+        ]
 
     def test_every_passage_names_the_picture(self):
         """The orphan tail, stated as the rule that prevents it."""
@@ -103,8 +116,9 @@ class AFigureIsDividedButNeverOrphaned(unittest.TestCase):
         question matches it closely and nothing else in the piece dilutes the match. It
         stays in the passage that also carries the description — the one whose job is
         already to be matched against a question."""
-        answering = [unit["text"] for unit in self._figure_units(self._parts())
-                     if "Answers:" in unit["text"]]
+        answering = [
+            unit["text"] for unit in self._figure_units(self._parts()) if "Answers:" in unit["text"]
+        ]
         self.assertEqual(1, len(answering))
         self.assertIn("An infographic illustrating", answering[0])
 
@@ -134,10 +148,12 @@ class AFigureIsDividedButNeverOrphaned(unittest.TestCase):
         retrieved chunk in full: a handful of figures that size is a prompt the grading
         model cannot answer inside its output window, and the call returns
         `finish_reason: length`, a priced call turned into a parse failure."""
-        calendar = self._parts("\n".join(
-            f"Row {i} | White Shirt | Navy Blue Blazer | Navy Blue Pleated Skirt"
-            for i in range(400)
-        ))
+        calendar = self._parts(
+            "\n".join(
+                f"Row {i} | White Shirt | Navy Blue Blazer | Navy Blue Pleated Skirt"
+                for i in range(400)
+            )
+        )
         units = self._figure_units(calendar)
 
         self.assertGreater(len(units), 1)
@@ -147,9 +163,9 @@ class AFigureIsDividedButNeverOrphaned(unittest.TestCase):
     def test_nothing_is_dropped_when_a_figure_is_divided(self):
         """The half the cap got wrong. A transcription is divided, not truncated: the
         last row of a 400-row calendar is as indexed as the first."""
-        calendar = self._parts("\n".join(
-            f"Row {i} | White Shirt | Navy Blue Blazer" for i in range(400)
-        ))
+        calendar = self._parts(
+            "\n".join(f"Row {i} | White Shirt | Navy Blue Blazer" for i in range(400))
+        )
         indexed = "\n".join(unit["text"] for unit in self._figure_units(calendar))
         self.assertIn("Row 0 ", indexed)
         self.assertIn("Row 399 ", indexed)
@@ -157,12 +173,13 @@ class AFigureIsDividedButNeverOrphaned(unittest.TestCase):
     def test_a_transcribed_table_repeats_its_header_in_every_group(self):
         """A fee row without its column names answers nothing, which is why real tables
         already group this way — `_split_table_row_groups`, reused rather than restated."""
-        fees = self._parts("\n".join(
-            ["| Year | Egyptian | International |", "|---|---|---|"]
-            + [f"| Y{i:02d} | {90 + i},000 EGP | {100 + i},000 EGP |" for i in range(60)]
-        ))
-        groups = [unit["text"] for unit in self._figure_units(fees)
-                  if "EGP" in unit["text"]]
+        fees = self._parts(
+            "\n".join(
+                ["| Year | Egyptian | International |", "|---|---|---|"]
+                + [f"| Y{i:02d} | {90 + i},000 EGP | {100 + i},000 EGP |" for i in range(60)]
+            )
+        )
+        groups = [unit["text"] for unit in self._figure_units(fees) if "EGP" in unit["text"]]
         self.assertGreater(len(groups), 1, "this fixture is meant to divide")
         for group in groups:
             self.assertIn("Year | Egyptian | International", group)
@@ -202,13 +219,16 @@ class AFigureIsDividedButNeverOrphaned(unittest.TestCase):
         """An older caller, or a block built by hand, carries only the joined surrogate.
         Its fields cannot be told apart — but the first line is the header by
         construction, and both properties this class exists for still hold."""
-        flat = "[Figure] Fee schedule\n" + "\n".join(
-            f"Grade {i} | 88,000 EGP" for i in range(300)
-        )
-        blocks = [{"type": "text", "content": flat, "page_number": 0,
-                   "asset_ids": ["kb.docx::p0::imgdeadbeef1234"]}]
-        units = [unit for unit in self.loader._blocks_to_units(blocks)
-                 if unit["kind"] == "figure"]
+        flat = "[Figure] Fee schedule\n" + "\n".join(f"Grade {i} | 88,000 EGP" for i in range(300))
+        blocks = [
+            {
+                "type": "text",
+                "content": flat,
+                "page_number": 0,
+                "asset_ids": ["kb.docx::p0::imgdeadbeef1234"],
+            }
+        ]
+        units = [unit for unit in self.loader._blocks_to_units(blocks) if unit["kind"] == "figure"]
 
         self.assertGreater(len(units), 1)
         for unit in units:
@@ -222,20 +242,24 @@ class AFigureIsDividedButNeverOrphaned(unittest.TestCase):
         unit larger than the budget is packed alone and whole. So the level budgets bound
         a chunk only for as long as every unit is smaller than one — which is exactly
         what a figure was not."""
-        calendar = self._parts("\n".join(
-            f"Row {i} | White Shirt | Navy Blue Blazer" for i in range(400)
-        ))
+        calendar = self._parts(
+            "\n".join(f"Row {i} | White Shirt | Navy Blue Blazer" for i in range(400))
+        )
         chunks = self.loader._hierarchy_chunks(
             self.loader._blocks_to_units(self._blocks(calendar)),
             {"filename": "kb.docx", "file_path": "kb.docx", "file_type": "Word"},
         )
-        budgets = {1: self.loader._level_1_size, 2: self.loader._level_2_size,
-                   3: self.loader._level_3_size}
+        budgets = {
+            1: self.loader._level_1_size,
+            2: self.loader._level_2_size,
+            3: self.loader._level_3_size,
+        }
         # The section prefix is prepended after packing, so it is allowed on top of the
         # budget; it is itself capped at 150 characters plus its newline.
         for chunk in chunks:
             self.assertLessEqual(
-                len(chunk["text"]), budgets[chunk["chunk_level"]] + 151,
+                len(chunk["text"]),
+                budgets[chunk["chunk_level"]] + 151,
                 f"L{chunk['chunk_level']} chunk over budget: {len(chunk['text'])}",
             )
 
@@ -246,8 +270,12 @@ class AFigureIsDividedButNeverOrphaned(unittest.TestCase):
         self.assertGreater(len(refined), 1)
 
     def test_a_table_is_still_regrouped_by_rows(self):
-        table = {"kind": "table", "rows": [["Grade", "Fee"], ["Y1", "88,000"]],
-                 "sections": (), "page": 0}
+        table = {
+            "kind": "table",
+            "rows": [["Grade", "Fee"], ["Y1", "88,000"]],
+            "sections": (),
+            "page": 0,
+        }
         refined = self.loader._refine_units([table], self.loader._splitter_level_3, 600)
         self.assertTrue(refined)
         self.assertTrue(all(unit["kind"] == "table" for unit in refined))
@@ -281,9 +309,16 @@ class TheCaptionComesFromTheImage(unittest.TestCase):
 
 
 def _knowledge_result(**kwargs) -> str:
-    base = dict(outcome="chunks", chunks="[1] Day Wear: Until Grade 6", constraints=[],
-                child_year="", discriminate="unknown", rewritten=False, partial=False,
-                figures=False)
+    base = dict(
+        outcome="chunks",
+        chunks="[1] Day Wear: Until Grade 6",
+        constraints=[],
+        child_year="",
+        discriminate="unknown",
+        rewritten=False,
+        partial=False,
+        figures=False,
+    )
     base.update(kwargs)
     return render_prompt("tools/knowledge_result.j2", **base)
 

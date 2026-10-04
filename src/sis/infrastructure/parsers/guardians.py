@@ -24,6 +24,7 @@ copies of `roster.py`'s rather than shared imports: `grades.py` already keeps it
 three small copies is the convention here, and reaching across modules for another
 parser's underscore-prefixed function would be the novelty.
 """
+
 from collections.abc import Mapping
 from typing import Final
 
@@ -127,12 +128,10 @@ _CONTAINABLE: Final[tuple[tuple[str, RelationshipType], ...]] = tuple(
 # `can_view_records` would silently bar a parent the school meant to admit, and the
 # registrar would only find out when the parent phoned to say the app shows nothing.
 _TRUE_WORDS: Final[frozenset[str]] = frozenset(
-    normalise_header(word)
-    for word in ("yes", "y", "true", "1", "x", "نعم", "صح", "مسموح", "متاح")
+    normalise_header(word) for word in ("yes", "y", "true", "1", "x", "نعم", "صح", "مسموح", "متاح")
 )
 _FALSE_WORDS: Final[frozenset[str]] = frozenset(
-    normalise_header(word)
-    for word in ("no", "n", "false", "0", "لا", "خطأ", "ممنوع", "غير مسموح")
+    normalise_header(word) for word in ("no", "n", "false", "0", "لا", "خطأ", "ممنوع", "غير مسموح")
 )
 
 
@@ -161,9 +160,7 @@ class SpreadsheetGuardianParser:
         rows: list[ParsedGuardianRow] = []
         diagnostics: list[RowOutcome] = []
         for row in sheet.rows:
-            outcome = _parse_row(
-                row.line, row.cells, columns, self._default_country_code
-            )
+            outcome = _parse_row(row.line, row.cells, columns, self._default_country_code)
             if isinstance(outcome, RowOutcome):
                 diagnostics.append(outcome)
             else:
@@ -194,9 +191,7 @@ def _parse_row(
     try:
         student_number = StudentNumber(raw_number)  # type: ignore[arg-type]  # takes cells
     except ValidationError as error:
-        return RowOutcome.from_error(
-            line, RowCode.MISSING_STUDENT_NUMBER, error, payload=payload
-        )
+        return RowOutcome.from_error(line, RowCode.MISSING_STUDENT_NUMBER, error, payload=payload)
 
     try:
         phone = Phone.parse(raw_phone, default_country_code=default_country_code)
@@ -211,16 +206,12 @@ def _parse_row(
     if raw_alt is not None:
         payload[GUARDIAN_ALT_PHONE.field] = _text(raw_alt)
         try:
-            alt_phone = Phone.parse_optional(
-                raw_alt, default_country_code=default_country_code
-            )
+            alt_phone = Phone.parse_optional(raw_alt, default_country_code=default_country_code)
         except ValidationError as error:
             # Rejected rather than dropped. A second number that cannot be read is a cell
             # the registrar typed and meant; silently discarding it would leave her
             # believing the school can reach a parent on a line it never stored.
-            return RowOutcome.from_error(
-                line, RowCode.MISSING_PHONE, error, payload=payload
-            )
+            return RowOutcome.from_error(line, RowCode.MISSING_PHONE, error, payload=payload)
 
     name_ar = columns.text(cells, GUARDIAN_NAME_AR.field) or ""
     name_en = columns.text(cells, GUARDIAN_NAME_EN.field) or ""
@@ -260,12 +251,8 @@ def _parse_row(
         relationship_type=relationship,
         relationship_label=label,
         alt_phone=alt_phone,
-        is_primary_contact=_flag(
-            columns.text(cells, IS_PRIMARY_CONTACT.field), default=False
-        ),
-        can_view_records=_flag(
-            columns.text(cells, CAN_VIEW_RECORDS.field), default=True
-        ),
+        is_primary_contact=_flag(columns.text(cells, IS_PRIMARY_CONTACT.field), default=False),
+        can_view_records=_flag(columns.text(cells, CAN_VIEW_RECORDS.field), default=True),
         restriction_note=columns.text(cells, RESTRICTION_NOTE.field) or "",
     )
 
@@ -332,9 +319,7 @@ def _require_a_name_column(columns: ColumnMap) -> None:
         return
     found = ", ".join(repr(header) for header in columns.headers) or "none at all"
     accepted = ", ".join(
-        repr(alias)
-        for spec in (GUARDIAN_NAME_AR, GUARDIAN_NAME_EN)
-        for alias in spec.aliases
+        repr(alias) for spec in (GUARDIAN_NAME_AR, GUARDIAN_NAME_EN) for alias in spec.aliases
     )
     raise UnreadableImportFile(
         f"no guardian name column was found; an Arabic or an English one is required "

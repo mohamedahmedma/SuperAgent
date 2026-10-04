@@ -6,12 +6,13 @@ clarification is resumed without the agent.
 
 Moved out of `service.py` with its behaviour unchanged.
 """
+
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from backend.agent.chat.answer_blocks import strip_answer_blocks
 from backend.agent.chat.resolution import conversation_text
-from backend.agent.profiles import get_profile
-from backend.agent.prompts import resolve as resolve_prompt
+from backend.profiles import get_profile
+from backend.prompts import resolve as resolve_prompt
 
 
 def _format_retrieved_chunks(docs: list[dict]) -> str:
@@ -51,17 +52,16 @@ def build_resume_answer_messages(
     )
 
     sections = []
-    dialogue = conversation_text(history or [], limit=get_profile().agent.query_resolution_history_messages)
+    dialogue = conversation_text(
+        history or [], limit=get_profile().agent.query_resolution_history_messages
+    )
     if dialogue:
         sections.append(f"The conversation so far:\n{dialogue}")
     sections.append(f"Original question:\n{original_question}")
     sections.append(f"HITL follow-up question:\n{prompt}")
     sections.append(f"User's answer:\n{user_answer}")
     if resolved_question:
-        sections.append(
-            "Read in context, the question to answer is:\n"
-            f"{resolved_question}"
-        )
+        sections.append(f"Read in context, the question to answer is:\n{resolved_question}")
     if conditions:
         # Same three-way rule as tools/knowledge_result.j2, and for the same reason: a
         # condition the material does not vary by must not be able to suppress an answer
@@ -151,7 +151,11 @@ def build_context_messages(
     user_text: str,
     turn_plan=None,
 ) -> list:
-    short_term = messages[-get_profile().agent.context_window_messages:] if len(messages) > get_profile().agent.context_window_messages else messages
+    short_term = (
+        messages[-get_profile().agent.context_window_messages :]
+        if len(messages) > get_profile().agent.context_window_messages
+        else messages
+    )
     context_messages: list = []
     # Same reason `conversation_text` strips them: the agent is deciding what this turn
     # needs, and a previous turn's table is not evidence about this one. The reader keeps

@@ -24,15 +24,17 @@ A cross-encoder is one forward pass per pair with nothing generated. An LLM aske
 is a generation call, which costs output tokens and duplicates the grader that already
 exists one rung up.
 """
+
 from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, List, Optional, Sequence
+from typing import List, Optional, Sequence
 
 from backend.agent.rag.evidence import AssessmentContext, Certainty, ChunkAssessment, EvidenceReport
 
 logger = logging.getLogger(__name__)
+
 
 class CrossEncoderProvider:
     """The cross-encoder, loaded once per process — including its failure.
@@ -62,7 +64,8 @@ class CrossEncoderProvider:
             except Exception:
                 logger.warning(
                     "cross-encoder %s unavailable; the ladder will fall through to the LLM grader",
-                    model_name, exc_info=True,
+                    model_name,
+                    exc_info=True,
                 )
                 self._failed = True
         return self._model

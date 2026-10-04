@@ -1,4 +1,5 @@
 """Adapters for provisioning a school: the database, and the record of its connection."""
+
 from sis.infrastructure.estate.config_store import (
     ConfigStoreUnavailable,
     DotEnvConfigStore,

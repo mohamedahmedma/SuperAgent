@@ -47,6 +47,7 @@ modules capture their values at import, several of them at module scope, and an 
 would have to reach all of them to be true. One write, before the first import, reaches
 all of them by construction.
 """
+
 from __future__ import annotations
 
 import logging
@@ -307,8 +308,7 @@ def log_provider_status(resolution: Optional[Resolution] = None) -> None:
             return
         if provider is None:
             logger.info(
-                "LLM provider: none selected (%s unset) — "
-                "using MODEL/BASE_URL/ARK_API_KEY as set",
+                "LLM provider: none selected (%s unset) — using MODEL/BASE_URL/ARK_API_KEY as set",
                 SELECTOR,
             )
             return

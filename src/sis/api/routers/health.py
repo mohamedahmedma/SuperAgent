@@ -10,6 +10,7 @@ Unauthenticated for the same reason: a probe that needs a key is a probe that re
 `false` when the key expires, and the operator is paged for an outage that is not one.
 Nothing here reveals anything a port scan does not already know.
 """
+
 from datetime import UTC, datetime
 from typing import Literal
 

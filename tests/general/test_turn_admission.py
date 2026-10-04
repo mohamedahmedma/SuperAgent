@@ -4,6 +4,7 @@ The per-user limits are Lua scripts, so they run against a REAL Redis: `TEST_RED
 which CI provides as a service, or the local one on 6379. Each test owns a key prefix
 and deletes it afterwards.
 """
+
 import logging
 import os
 import time
@@ -44,7 +45,9 @@ class _RedisTest(unittest.TestCase):
     def door(self, **limits):
         limits.setdefault("turns_per_minute", 0)
         limits.setdefault("concurrent", 0)
-        return TurnAdmission(redis=lambda: _CLIENT, key=lambda name: f"{self.prefix}:{name}", **limits)
+        return TurnAdmission(
+            redis=lambda: _CLIENT, key=lambda name: f"{self.prefix}:{name}", **limits
+        )
 
 
 @requires_redis
@@ -69,7 +72,10 @@ class TurnRateTests(_RedisTest):
 
     def test_every_replica_shares_one_count(self):
         """Two doors on one Redis are two workers: the limit is the user's, not the process's."""
-        first, second = self.door(turns_per_minute=60, burst=2), self.door(turns_per_minute=60, burst=2)
+        first, second = (
+            self.door(turns_per_minute=60, burst=2),
+            self.door(turns_per_minute=60, burst=2),
+        )
         first.admit("parent")
         second.admit("parent")
         self.assertIsInstance(first.admit("parent"), Refusal)
@@ -115,7 +121,9 @@ class ProviderBusyTests(unittest.TestCase):
         def must_not_be_asked():
             raise AssertionError("the provider check needs no Redis round trip")
 
-        refused = TurnAdmission(redis=must_not_be_asked, quotas=quotas, turns_per_minute=12).admit("p")
+        refused = TurnAdmission(redis=must_not_be_asked, quotas=quotas, turns_per_minute=12).admit(
+            "p"
+        )
         self.assertEqual("provider_busy", refused.reason)
         self.assertGreater(refused.retry_after, 35)
 
@@ -184,7 +192,9 @@ class ChatRouteTests(_RedisTest):
                 self.assertEqual(200, response.status_code, response.text)
                 self.assertIn("[DONE]", response.text)
                 deadline = time.time() + 2
-                while _CLIENT.zcard(f"{self.prefix}:turns:inflight:parent") and time.time() < deadline:
+                while (
+                    _CLIENT.zcard(f"{self.prefix}:turns:inflight:parent") and time.time() < deadline
+                ):
                     time.sleep(0.02)
             self.assertEqual(3, route.started)
         finally:
@@ -193,7 +203,7 @@ class ChatRouteTests(_RedisTest):
 
 class RefusalCopyTests(unittest.TestCase):
     def test_the_parent_is_told_in_their_language_how_long_to_wait(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         copy = get_profile().user_copy
         self.assertIn("5 seconds", Refusal("too_many_turns", 4.2).message(copy, "en"))

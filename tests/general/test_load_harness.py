@@ -6,6 +6,7 @@ answers are pinned here — valid against the schema asked for, routed the way a
 knowledge-base turn goes — and so is the load report's refusal to count a turn that
 ended in an apology.
 """
+
 import json
 import math
 import unittest
@@ -24,41 +25,86 @@ def _no_wait():
 
 class SchemaInstanceTests(unittest.TestCase):
     def test_every_required_field_is_present_and_typed(self):
-        schema = {"type": "object", "properties": {
-            "scope": {"enum": ["in_domain", "out_of_domain"]},
-            "tags": {"type": "array", "items": {"type": "string"}},
-            "confidence": {"type": "number"}, "count": {"type": "integer"},
-            "flag": {"type": "boolean"}, "why": {"type": "string"},
-        }}
+        schema = {
+            "type": "object",
+            "properties": {
+                "scope": {"enum": ["in_domain", "out_of_domain"]},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "confidence": {"type": "number"},
+                "count": {"type": "integer"},
+                "flag": {"type": "boolean"},
+                "why": {"type": "string"},
+            },
+        }
         value = stub.instance(schema, question="q")
-        self.assertEqual({"scope": "in_domain", "tags": [], "confidence": 0.0, "count": 0,
-                          "flag": False, "why": "q"}, value)
+        self.assertEqual(
+            {
+                "scope": "in_domain",
+                "tags": [],
+                "confidence": 0.0,
+                "count": 0,
+                "flag": False,
+                "why": "q",
+            },
+            value,
+        )
 
     def test_refs_and_optional_unions_resolve(self):
-        schema = {"type": "object", "$defs": {"Kind": {"enum": ["a", "b"]}},
-                  "properties": {"kind": {"$ref": "#/$defs/Kind"},
-                                 "maybe": {"anyOf": [{"type": "null"}, {"type": "integer"}]}}}
+        schema = {
+            "type": "object",
+            "$defs": {"Kind": {"enum": ["a", "b"]}},
+            "properties": {
+                "kind": {"$ref": "#/$defs/Kind"},
+                "maybe": {"anyOf": [{"type": "null"}, {"type": "integer"}]},
+            },
+        }
         self.assertEqual({"kind": "a", "maybe": 0}, stub.instance(schema))
 
     def test_the_route_deciding_fields_send_a_turn_down_the_knowledge_path(self):
-        fmt = {"type": "json_schema", "json_schema": {"name": "RequestEnvelope", "schema": {
-            "type": "object", "properties": {
-                "scope": {"enum": ["out_of_domain", "in_domain"]},
-                "needed_tools": {"type": "array", "items": {"type": "string"}},
-            }}}}
+        fmt = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "RequestEnvelope",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "scope": {"enum": ["out_of_domain", "in_domain"]},
+                        "needed_tools": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        }
         value = stub.structured_answer(fmt, "fees?")
         self.assertEqual("in_domain", value["scope"])
         self.assertEqual([stub.KNOWLEDGE_TOOL], value["needed_tools"])
 
     def test_a_pinned_field_the_schema_lacks_is_not_invented(self):
-        fmt = {"type": "json_schema", "json_schema": {"name": "EvidenceGrade", "schema": {
-            "type": "object", "properties": {"route": {"enum": ["rewrite", "answer"]}}}}}
+        fmt = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "EvidenceGrade",
+                "schema": {
+                    "type": "object",
+                    "properties": {"route": {"enum": ["rewrite", "answer"]}},
+                },
+            },
+        }
         self.assertEqual({"route": "answer"}, stub.structured_answer(fmt, "q"))
 
     def test_the_resolver_hands_back_the_question_it_was_given(self):
-        fmt = {"type": "json_schema", "json_schema": {"name": "ResolvedQuery", "schema": {
-            "type": "object", "properties": {"question": {"type": "string"},
-                                             "search_text": {"type": "string"}}}}}
+        fmt = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "ResolvedQuery",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string"},
+                        "search_text": {"type": "string"},
+                    },
+                },
+            },
+        }
         value = stub.structured_answer(fmt, "When does term start?")
         self.assertEqual("When does term start?", value["question"])
         self.assertEqual("When does term start?", value["search_text"])
@@ -66,7 +112,9 @@ class SchemaInstanceTests(unittest.TestCase):
 
 class StubEndpointTests(unittest.TestCase):
     def setUp(self):
-        self.saved = {k: getattr(stub.Latency, k) for k in vars(stub.Latency) if not k.startswith("_")}
+        self.saved = {
+            k: getattr(stub.Latency, k) for k in vars(stub.Latency) if not k.startswith("_")
+        }
         _no_wait()
         self.client = TestClient(stub.app)
 
@@ -75,23 +123,42 @@ class StubEndpointTests(unittest.TestCase):
             setattr(stub.Latency, key, value)
 
     def _tools(self):
-        return [{"type": "function", "function": {"name": stub.KNOWLEDGE_TOOL, "parameters": {
-            "type": "object", "properties": {"query": {"type": "string"}}}}}]
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": stub.KNOWLEDGE_TOOL,
+                    "parameters": {"type": "object", "properties": {"query": {"type": "string"}}},
+                },
+            }
+        ]
 
     def test_offered_tools_and_none_run_yet_is_a_call_to_the_knowledge_tool(self):
-        body = {"model": "m", "tools": self._tools(),
-                "messages": [{"role": "user", "content": "What are the fees?"}]}
-        message = self.client.post("/v1/chat/completions", json=body).json()["choices"][0]["message"]
+        body = {
+            "model": "m",
+            "tools": self._tools(),
+            "messages": [{"role": "user", "content": "What are the fees?"}],
+        }
+        message = self.client.post("/v1/chat/completions", json=body).json()["choices"][0][
+            "message"
+        ]
         call = message["tool_calls"][0]["function"]
         self.assertEqual(stub.KNOWLEDGE_TOOL, call["name"])
         self.assertEqual({"query": "What are the fees?"}, json.loads(call["arguments"]))
 
     def test_once_a_tool_has_run_the_reply_is_text(self):
-        body = {"model": "m", "tools": self._tools(), "messages": [
-            {"role": "user", "content": "fees?"},
-            {"role": "assistant", "content": None, "tool_calls": []},
-            {"role": "tool", "tool_call_id": "c1", "content": "evidence"}]}
-        message = self.client.post("/v1/chat/completions", json=body).json()["choices"][0]["message"]
+        body = {
+            "model": "m",
+            "tools": self._tools(),
+            "messages": [
+                {"role": "user", "content": "fees?"},
+                {"role": "assistant", "content": None, "tool_calls": []},
+                {"role": "tool", "tool_call_id": "c1", "content": "evidence"},
+            ],
+        }
+        message = self.client.post("/v1/chat/completions", json=body).json()["choices"][0][
+            "message"
+        ]
         self.assertTrue(message["content"])
         self.assertNotIn("tool_calls", message)
 
@@ -101,15 +168,27 @@ class StubEndpointTests(unittest.TestCase):
         load-test knowledge turn paid a model call, a search and a grade production does not."""
         from backend.provider_compat import fold_messages
 
-        folded = fold_messages([
-            {"role": "user", "content": "What are the fees?"},
-            {"role": "assistant", "content": None, "tool_calls": [
-                {"id": "c1", "type": "function",
-                 "function": {"name": stub.KNOWLEDGE_TOOL, "arguments": "{}"}}]},
-            {"role": "tool", "tool_call_id": "c1", "content": "Fees are reviewed each year."}])
+        folded = fold_messages(
+            [
+                {"role": "user", "content": "What are the fees?"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": stub.KNOWLEDGE_TOOL, "arguments": "{}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "c1", "content": "Fees are reviewed each year."},
+            ]
+        )
         self.assertFalse(any(message.get("role") == "tool" for message in folded))
-        message = self.client.post("/v1/chat/completions", json={
-            "model": "m", "tools": self._tools(), "messages": folded}).json()["choices"][0]["message"]
+        message = self.client.post(
+            "/v1/chat/completions", json={"model": "m", "tools": self._tools(), "messages": folded}
+        ).json()["choices"][0]["message"]
         self.assertTrue(message["content"])
         self.assertNotIn("tool_calls", message)
         self.assertEqual("What are the fees?", stub.last_user_text(folded))
@@ -119,8 +198,9 @@ class StubEndpointTests(unittest.TestCase):
         with self.client.stream("POST", "/v1/chat/completions", json=body) as response:
             lines = [line for line in response.iter_lines() if line.startswith("data: ")]
         self.assertEqual("data: [DONE]", lines[-1])
-        words = [json.loads(line[6:])["choices"][0]["delta"].get("content", "")
-                 for line in lines[:-1]]
+        words = [
+            json.loads(line[6:])["choices"][0]["delta"].get("content", "") for line in lines[:-1]
+        ]
         self.assertGreaterEqual(sum(1 for w in words if w.strip()), stub.Latency.tokens)
 
     def test_embeddings_are_unit_length_deterministic_and_one_per_input(self):

@@ -10,6 +10,7 @@ the stores — "no student was created" is not a report to read, it is a dict th
 empty — and commit is checked against the stores rather than against its own result, since
 a service reporting a write it never made is exactly the failure worth catching.
 """
+
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -66,9 +67,7 @@ class _Sections:
     def __init__(self, *sections: ClassSection) -> None:
         self.rows = {s.identity: s for s in sections}
 
-    def get_many(
-        self, keys: Collection[tuple[str, str]]
-    ) -> Mapping[tuple[str, str], ClassSection]:
+    def get_many(self, keys: Collection[tuple[str, str]]) -> Mapping[tuple[str, str], ClassSection]:
         return {key: self.rows[key] for key in keys if key in self.rows}
 
 
@@ -332,7 +331,9 @@ def test_a_number_already_belonging_to_another_child_is_refused() -> None:
     every grade, enrolment and `records/` guardian link hangs from to a different human
     being, and nothing anywhere reports it.
     """
-    uow = _school(students=[Student(student_number="0071", full_name_ar="", full_name_en="Sara Ali")])
+    uow = _school(
+        students=[Student(student_number="0071", full_name_ar="", full_name_en="Sara Ali")]
+    )
     service = _service(uow, [_row(2, "0071", name_en="Noor Hassan"), _row(3, "0072")])
 
     preview = _preview(service)

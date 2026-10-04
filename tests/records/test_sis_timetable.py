@@ -16,6 +16,7 @@ be invisible from the data and would put a code that goes stale mid-year into a 
 Mocked at the adapter's own `_get`, which is where `records/`'s other adapter tests sit — no
 network, and no extra dependency to keep current.
 """
+
 from unittest.mock import patch
 
 import pytest
@@ -89,9 +90,7 @@ NO_CLASS = {
 
 @pytest.fixture()
 def adapter() -> SisTimetableAdapter:
-    return SisTimetableAdapter(
-        base_url="http://sis.test", api_key="reader", timeout_seconds=5.0
-    )
+    return SisTimetableAdapter(base_url="http://sis.test", api_key="reader", timeout_seconds=5.0)
 
 
 def test_a_week_arrives_with_its_grid_and_its_names(adapter: SisTimetableAdapter) -> None:
@@ -102,9 +101,7 @@ def test_a_week_arrives_with_its_grid_and_its_names(adapter: SisTimetableAdapter
     a parent, so the names are what has to survive the mapping.
     """
     with patch.object(SisTimetableAdapter, "_get", return_value=WEEK):
-        week = adapter.get_timetable(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        week = adapter.get_timetable(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
     assert week.status is TimetableStatus.OK
     assert week.class_code == "3A"
@@ -130,9 +127,7 @@ def test_the_break_stays_a_break(adapter: SisTimetableAdapter) -> None:
     not have, and drawn as one.
     """
     with patch.object(SisTimetableAdapter, "_get", return_value=WEEK):
-        week = adapter.get_timetable(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        week = adapter.get_timetable(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
     lesson_slot, break_slot = week.periods
     assert lesson_slot.is_teaching is True
@@ -150,9 +145,7 @@ def test_the_bell_is_trimmed_to_minutes_and_an_unfixed_one_stays_empty(
     from an agreed one.
     """
     with patch.object(SisTimetableAdapter, "_get", return_value=WEEK):
-        week = adapter.get_timetable(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        week = adapter.get_timetable(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
     lesson_slot, break_slot = week.periods
     assert (lesson_slot.starts_at, lesson_slot.ends_at) == ("08:00", "08:45")
@@ -171,16 +164,12 @@ def test_no_class_and_no_timetable_are_different_answers(
     typing to do. Told apart nowhere else, a parent hears "she has no lessons" for both.
     """
     with patch.object(SisTimetableAdapter, "_get", return_value=NO_CLASS):
-        absent = adapter.get_timetable(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        absent = adapter.get_timetable(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
     assert absent.status is TimetableStatus.NO_CLASS
     assert absent.class_code == ""
     assert absent.has_class is False
 
-    with patch.object(
-        SisTimetableAdapter, "_get", return_value={**WEEK, "lessons": []}
-    ):
+    with patch.object(SisTimetableAdapter, "_get", return_value={**WEEK, "lessons": []}):
         untimetabled = adapter.get_timetable(
             student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
         )
@@ -198,9 +187,7 @@ def test_nothing_on_file_is_an_answer_and_not_an_outage(
     unknown term. `records/` deliberately makes those indistinguishable, so all three
     arrive here as "no class on file" rather than as three different failures."""
     with patch.object(SisTimetableAdapter, "_get", return_value=None):
-        week = adapter.get_timetable(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        week = adapter.get_timetable(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
     assert week.status is TimetableStatus.NO_CLASS
     assert week.lessons == ()
@@ -211,9 +198,7 @@ def test_lessons_on_a_day_are_answerable_without_a_caller_matching_strings(
 ) -> None:
     """A day with no lessons is a real answer a renderer has to be able to ask for."""
     with patch.object(SisTimetableAdapter, "_get", return_value=WEEK):
-        week = adapter.get_timetable(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        week = adapter.get_timetable(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
     assert [l.subject_code for l in week.lessons_on("saturday")] == ["MATH"]
     assert week.lessons_on("Monday") == ()
@@ -248,9 +233,7 @@ def test_the_week_is_read_through_the_guardian_scoped_route(
     A route that named no parent would throw the second refusal away at the last hop and
     still return the right week.
     """
-    path, params = _path_asked(
-        adapter, student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-    )
+    path, params = _path_asked(adapter, student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
     assert path == "/v1/guardians/by-id/G-1/students/S-1001/timetable"
     assert params == {"term": "2026-T1"}
 
@@ -261,9 +244,7 @@ def test_no_class_is_ever_asked_for(adapter: SisTimetableAdapter) -> None:
     Pinned because the tempting shortcut — have the caller pass a class code — is one that
     works until a child moves and then asks for the week of a room she has left.
     """
-    path, params = _path_asked(
-        adapter, student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-    )
+    path, params = _path_asked(adapter, student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
     assert "class" not in path
     assert "class_code" not in params
 
@@ -276,24 +257,20 @@ def test_a_handle_with_a_slash_cannot_rewrite_the_path(
     Unquoted, `../..` would climb out of the guardian prefix — the one place a crafted
     value turns a scoped read into an unscoped one.
     """
-    path, _ = _path_asked(
-        adapter, student_ref="S-1001", term="2026-T1", guardian_ref="../.."
-    )
+    path, _ = _path_asked(adapter, student_ref="S-1001", term="2026-T1", guardian_ref="../..")
     assert path == "/v1/guardians/by-id/..%2F../students/S-1001/timetable"
     assert "/v1/students/" not in path
 
 
 def test_an_unreachable_sis_is_never_an_empty_week() -> None:
-    """"Could not ask" is never "the answer is no".
+    """ "Could not ask" is never "the answer is no".
 
     A timetable read that failed soft would tell a parent her daughter has no lessons
     because a service was briefly down. `TimetableUnavailable` is an `UpstreamUnavailable`,
     so the facade answers 503 with `lms_unavailable` and the agent says records are
     unavailable rather than inventing a week.
     """
-    adapter = SisTimetableAdapter(
-        base_url="http://sis.test", api_key="reader", timeout_seconds=5.0
-    )
+    adapter = SisTimetableAdapter(base_url="http://sis.test", api_key="reader", timeout_seconds=5.0)
 
     class _Boom:
         def get(self, *_args, **_kwargs):
@@ -303,9 +280,7 @@ def test_an_unreachable_sis_is_never_an_empty_week() -> None:
 
     with patch.object(adapter._pool, "get", return_value=_Boom()):
         with pytest.raises(TimetableUnavailable):
-            adapter.get_timetable(
-                student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-            )
+            adapter.get_timetable(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
 
 def test_a_base_url_is_required() -> None:

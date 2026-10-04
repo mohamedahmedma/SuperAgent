@@ -17,6 +17,7 @@ table silently defaults it to 400.
 answer is a 4xx. Collapsing them means a school with no WhatsApp number configured tells
 parents they typed something wrong.
 """
+
 from __future__ import annotations
 
 

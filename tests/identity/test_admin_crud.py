@@ -16,6 +16,7 @@ somebody can read.
 routes are the only way to bind a parent to their children, so losing every administrator
 locks the school out of onboarding until the seeded account is restored by a restart.
 """
+
 import pytest
 
 from tests.identity.conftest import BOOTSTRAP_ADMIN_PASSWORD, BOOTSTRAP_ADMIN_USER
@@ -68,7 +69,9 @@ class TestListing:
 
     def test_an_absurd_limit_is_refused_rather_than_served(self, client, admin_headers):
         """A management screen must not be able to ask for the whole school in one call."""
-        assert client.get("/v1/admin/accounts?limit=100000", headers=admin_headers).status_code == 422
+        assert (
+            client.get("/v1/admin/accounts?limit=100000", headers=admin_headers).status_code == 422
+        )
 
     def test_a_non_admin_cannot_list_accounts(self, client, admin_headers, staff):
         token = client.post(
@@ -76,17 +79,13 @@ class TestListing:
             json={"username": staff, "password": "correct-horse-battery"},
         ).json()["access_token"]
 
-        response = client.get(
-            "/v1/admin/accounts", headers={"Authorization": f"Bearer {token}"}
-        )
+        response = client.get("/v1/admin/accounts", headers={"Authorization": f"Bearer {token}"})
 
         assert response.status_code == 403
 
 
 class TestUpdating:
-    def test_a_password_can_be_changed_and_the_new_one_works(
-        self, client, admin_headers, staff
-    ):
+    def test_a_password_can_be_changed_and_the_new_one_works(self, client, admin_headers, staff):
         response = client.patch(
             f"/v1/admin/accounts/{staff}",
             headers=admin_headers,
@@ -94,16 +93,20 @@ class TestUpdating:
         )
         assert response.status_code == 200
 
-        assert client.post(
-            "/v1/auth/login", json={"username": staff, "password": "a-brand-new-password"}
-        ).status_code == 200
-        assert client.post(
-            "/v1/auth/login", json={"username": staff, "password": "correct-horse-battery"}
-        ).status_code == 401
+        assert (
+            client.post(
+                "/v1/auth/login", json={"username": staff, "password": "a-brand-new-password"}
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                "/v1/auth/login", json={"username": staff, "password": "correct-horse-battery"}
+            ).status_code
+            == 401
+        )
 
-    def test_changing_a_password_revokes_existing_sessions(
-        self, client, admin_headers, staff
-    ):
+    def test_changing_a_password_revokes_existing_sessions(self, client, admin_headers, staff):
         """Otherwise the change is cosmetic for a full refresh lifetime.
 
         A password is changed because it leaked or because somebody left. In both cases the
@@ -119,9 +122,7 @@ class TestUpdating:
             json={"password": "a-brand-new-password"},
         )
 
-        refreshed = client.post(
-            "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
-        )
+        refreshed = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
         assert refreshed.status_code == 401
 
     def test_a_role_can_be_changed(self, client, admin_headers, staff):
@@ -140,9 +141,12 @@ class TestUpdating:
             f"/v1/admin/accounts/{staff}", headers=admin_headers, json={"is_active": False}
         )
 
-        assert client.post(
-            "/v1/auth/login", json={"username": staff, "password": "correct-horse-battery"}
-        ).status_code == 401
+        assert (
+            client.post(
+                "/v1/auth/login", json={"username": staff, "password": "correct-horse-battery"}
+            ).status_code
+            == 401
+        )
         listed = client.get("/v1/admin/accounts", headers=admin_headers).json()
         assert staff in [a["username"] for a in listed["accounts"]]
 
@@ -180,22 +184,21 @@ class TestUpdating:
 
 
 class TestDeleting:
-    def test_an_account_is_removed_and_can_no_longer_log_in(
-        self, client, admin_headers, staff
-    ):
-        assert client.delete(
-            f"/v1/admin/accounts/{staff}", headers=admin_headers
-        ).status_code == 204
+    def test_an_account_is_removed_and_can_no_longer_log_in(self, client, admin_headers, staff):
+        assert (
+            client.delete(f"/v1/admin/accounts/{staff}", headers=admin_headers).status_code == 204
+        )
 
-        assert client.post(
-            "/v1/auth/login", json={"username": staff, "password": "correct-horse-battery"}
-        ).status_code == 401
+        assert (
+            client.post(
+                "/v1/auth/login", json={"username": staff, "password": "correct-horse-battery"}
+            ).status_code
+            == 401
+        )
         listed = client.get("/v1/admin/accounts", headers=admin_headers).json()
         assert staff not in [a["username"] for a in listed["accounts"]]
 
-    def test_deleting_revokes_the_sessions_it_was_holding(
-        self, client, admin_headers, staff
-    ):
+    def test_deleting_revokes_the_sessions_it_was_holding(self, client, admin_headers, staff):
         """Deleting the row alone would leave a browser renewing itself indefinitely.
 
         An access token already minted stays valid until it expires — that is the trade
@@ -208,14 +211,15 @@ class TestDeleting:
 
         client.delete(f"/v1/admin/accounts/{staff}", headers=admin_headers)
 
-        assert client.post(
-            "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
-        ).status_code == 401
+        assert (
+            client.post(
+                "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+            ).status_code
+            == 401
+        )
 
     def test_deleting_an_unknown_account_is_404(self, client, admin_headers):
-        assert client.delete(
-            "/v1/admin/accounts/nobody", headers=admin_headers
-        ).status_code == 404
+        assert client.delete("/v1/admin/accounts/nobody", headers=admin_headers).status_code == 404
 
 
 class TestTheLastAdministratorIsProtected:
@@ -264,13 +268,16 @@ class TestTheLastAdministratorIsProtected:
         )
 
         assert response.status_code == 200
-        assert client.post(
-            "/v1/auth/login",
-            json={
-                "username": BOOTSTRAP_ADMIN_USER,
-                "password": "rotated-away-from-the-env-value",
-            },
-        ).status_code == 200
+        assert (
+            client.post(
+                "/v1/auth/login",
+                json={
+                    "username": BOOTSTRAP_ADMIN_USER,
+                    "password": "rotated-away-from-the-env-value",
+                },
+            ).status_code
+            == 200
+        )
 
     def test_an_admin_may_be_removed_once_another_exists(self, client, admin_headers, staff):
         """Ordinary staff turnover must still work.
@@ -278,13 +285,14 @@ class TestTheLastAdministratorIsProtected:
         Forbidding self-removal outright would mean the last person to leave can never tidy
         up after themselves — so the rule counts administrators rather than naming them.
         """
-        client.patch(
-            f"/v1/admin/accounts/{staff}", headers=admin_headers, json={"role": "admin"}
-        )
+        client.patch(f"/v1/admin/accounts/{staff}", headers=admin_headers, json={"role": "admin"})
 
-        assert client.delete(
-            f"/v1/admin/accounts/{BOOTSTRAP_ADMIN_USER}", headers=admin_headers
-        ).status_code == 204
+        assert (
+            client.delete(
+                f"/v1/admin/accounts/{BOOTSTRAP_ADMIN_USER}", headers=admin_headers
+            ).status_code
+            == 204
+        )
 
     def test_an_inactive_admin_does_not_count_as_cover(self, client, admin_headers, staff):
         """A suspended administrator cannot log in, so they cannot unlock anything.
@@ -306,9 +314,7 @@ class TestTheLastAdministratorIsProtected:
 
 
 class TestTheSeededAdminReturns:
-    def test_a_deleted_seeded_admin_comes_back_on_the_next_boot(
-        self, client, admin_headers, staff
-    ):
+    def test_a_deleted_seeded_admin_comes_back_on_the_next_boot(self, client, admin_headers, staff):
         """The bootstrap guarantee doing its job, not a bug.
 
         It is also the reason removing a seeded administrator for good means clearing
@@ -316,9 +322,7 @@ class TestTheSeededAdminReturns:
         """
         from identity.infrastructure.db.bootstrap import seed_bootstrap_admin
 
-        client.patch(
-            f"/v1/admin/accounts/{staff}", headers=admin_headers, json={"role": "admin"}
-        )
+        client.patch(f"/v1/admin/accounts/{staff}", headers=admin_headers, json={"role": "admin"})
         client.delete(f"/v1/admin/accounts/{BOOTSTRAP_ADMIN_USER}", headers=admin_headers)
 
         seed_bootstrap_admin(
@@ -327,10 +331,13 @@ class TestTheSeededAdminReturns:
             pbkdf2_rounds=2000,
         )
 
-        assert client.post(
-            "/v1/auth/login",
-            json={
-                "username": BOOTSTRAP_ADMIN_USER,
-                "password": BOOTSTRAP_ADMIN_PASSWORD,
-            },
-        ).status_code == 200
+        assert (
+            client.post(
+                "/v1/auth/login",
+                json={
+                    "username": BOOTSTRAP_ADMIN_USER,
+                    "password": BOOTSTRAP_ADMIN_PASSWORD,
+                },
+            ).status_code
+            == 200
+        )

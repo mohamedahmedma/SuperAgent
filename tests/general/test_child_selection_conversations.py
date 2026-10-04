@@ -30,6 +30,7 @@ The last class drives whole conversations through the real `plan_turn` with the 
 the resolver and the roster read all stubbed, so the ladder underneath these rules is
 exercised end to end without a model or a socket.
 """
+
 import os
 import unittest
 from unittest.mock import patch
@@ -43,7 +44,7 @@ from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.resolution import unresolved
 from backend.agent.chat.signals import RequestSignals
 from backend.agent.chat.turn_policy import resolve_turn
-from backend.agent.profiles.registry import load_profile, set_profile
+from backend.profiles.registry import load_profile, set_profile
 
 KNOWLEDGE_TOOL = "search_knowledge_base"
 RECORDS_TOOL = "get_student_grades"
@@ -69,7 +70,9 @@ HANI = ChildOption(student_id="S-4", label="هاني أحمد", gender="unknown"
 FAMILY = [LAYLA, OMAR, SARA]
 
 
-def _pin(child: ChildOption | None = None, *, student_id: str = "", guardian_id: str = GUARDIAN) -> SessionChild:
+def _pin(
+    child: ChildOption | None = None, *, student_id: str = "", guardian_id: str = GUARDIAN
+) -> SessionChild:
     """The pin a previous turn would have left behind.
 
     Written the way production writes it — `ChatRequestContext.remember_child`, which is
@@ -102,20 +105,16 @@ class _Copy:
 
 def _plan(child, *, question="q", **signal_kwargs):
     signals = RequestSignals(question=question, **signal_kwargs)
-    return resolve_turn(
-        signals, agent_config=_Agent(), copy_config=_Copy(), child=child
-    )
+    return resolve_turn(signals, agent_config=_Agent(), copy_config=_Copy(), child=child)
 
 
 def _turn(reference, *, pin=None, name="", roster=FAMILY):
     """One conversational turn's child decision, given what the last one left behind."""
-    return resolve_child(
-        reference=reference, child_name=name, roster=list(roster), pin=pin
-    )
+    return resolve_child(reference=reference, child_name=name, roster=list(roster), pin=pin)
 
 
 class TheSettledChildCarriesToTheNextMessage(unittest.TestCase):
-    """"طيب وغيابها؟" — a message whose subject is entirely in the previous one."""
+    """ "طيب وغيابها؟" — a message whose subject is entirely in the previous one."""
 
     def test_a_pronoun_followup_resolves_to_the_pinned_child(self):
         """The failure this catches is being asked "which child?" twice in a row.
@@ -203,7 +202,7 @@ class ANameMovesTheConversationOn(unittest.TestCase):
 
 
 class AStatedSexOverridesAContradictingPin(unittest.TestCase):
-    """"my son" after a conversation about a daughter is a change of subject."""
+    """ "my son" after a conversation about a daughter is a change of subject."""
 
     def test_a_son_after_settling_on_a_daughter_switches_to_the_son(self):
         switched = _turn("son", pin=_pin(LAYLA))
@@ -250,8 +249,9 @@ class AStatedSexOverridesAContradictingPin(unittest.TestCase):
     def test_the_switch_ends_the_turn_with_the_question_rather_than_a_guess(self):
         """The plan side of the case above: no hint, no tools, and the profile's own
         copy as the reply. An agent built here could only guess."""
-        plan = _plan(_turn("daughter", pin=_pin(OMAR)), about_child=True,
-                     child_question_kind="records")
+        plan = _plan(
+            _turn("daughter", pin=_pin(OMAR)), about_child=True, child_question_kind="records"
+        )
 
         self.assertEqual(plan.child_hint, "")
         self.assertEqual(plan.child_options, [LAYLA.label, SARA.label])
@@ -308,7 +308,7 @@ class APinTheRosterNoLongerCarries(unittest.TestCase):
 
 
 class PluralMidConversation(unittest.TestCase):
-    """"اولادي" — the one reference that must neither narrow nor ask."""
+    """ "اولادي" — the one reference that must neither narrow nor ask."""
 
     def test_a_plural_message_does_not_collapse_onto_the_pin(self):
         """The failure is silent and the worst kind: a parent asks about all of their
@@ -329,8 +329,9 @@ class PluralMidConversation(unittest.TestCase):
     def test_a_plural_turn_keeps_every_tool_bound(self):
         """Nothing was settled, so the narrowing must not fire off the previous turn's
         child. Both tools stay bound and nothing is forced."""
-        plan = _plan(_turn("plural", pin=_pin(LAYLA)), about_child=True,
-                     child_question_kind="records")
+        plan = _plan(
+            _turn("plural", pin=_pin(LAYLA)), about_child=True, child_question_kind="records"
+        )
 
         self.assertIsNone(plan.exposed_tools)
         self.assertEqual(plan.forced_tool, "")
@@ -409,10 +410,12 @@ class TheNarrowingIsDecidedAfreshEveryTurn(unittest.TestCase):
         narrowing cached with the child would answer the second from the record."""
         pinned = _pin(LAYLA)
 
-        records = _plan(_turn("context", pin=pinned), about_child=True,
-                        child_question_kind="records")
-        school_matter = _plan(_turn("context", pin=pinned), about_child=True,
-                              child_question_kind="school_matter")
+        records = _plan(
+            _turn("context", pin=pinned), about_child=True, child_question_kind="records"
+        )
+        school_matter = _plan(
+            _turn("context", pin=pinned), about_child=True, child_question_kind="school_matter"
+        )
 
         self.assertEqual(records.exposed_tools, [RECORDS_TOOL])
         self.assertEqual(records.forced_tool, RECORDS_TOOL)
@@ -424,8 +427,7 @@ class TheNarrowingIsDecidedAfreshEveryTurn(unittest.TestCase):
         as well as a real verdict, and either way it must restore every tool."""
         pinned = _pin(LAYLA)
         _plan(_turn("context", pin=pinned), about_child=True, child_question_kind="records")
-        after = _plan(_turn("context", pin=pinned), about_child=True,
-                      child_question_kind="both")
+        after = _plan(_turn("context", pin=pinned), about_child=True, child_question_kind="both")
 
         self.assertIsNone(after.exposed_tools)
         self.assertEqual(after.forced_tool, "")
@@ -435,8 +437,9 @@ class TheNarrowingIsDecidedAfreshEveryTurn(unittest.TestCase):
         The turn after it, once the parent has chosen, is an ordinary narrowed turn —
         the empty list must not persist."""
         asked = _plan(_turn("context"), about_child=True, child_question_kind="records")
-        chosen = _plan(_turn("context", pin=_pin(LAYLA)), about_child=True,
-                       child_question_kind="records")
+        chosen = _plan(
+            _turn("context", pin=_pin(LAYLA)), about_child=True, child_question_kind="records"
+        )
 
         self.assertEqual(asked.exposed_tools, [])
         self.assertEqual(chosen.exposed_tools, [RECORDS_TOOL])
@@ -444,8 +447,11 @@ class TheNarrowingIsDecidedAfreshEveryTurn(unittest.TestCase):
     def test_switching_child_mid_conversation_re_narrows_for_the_new_child(self):
         """The narrowing follows whichever child the CURRENT turn settled on, so the
         forced records read is issued against the sibling's id, not the pin's."""
-        plan = _plan(_turn("named", name="عمر", pin=_pin(LAYLA)), about_child=True,
-                     child_question_kind="records")
+        plan = _plan(
+            _turn("named", name="عمر", pin=_pin(LAYLA)),
+            about_child=True,
+            child_question_kind="records",
+        )
 
         self.assertEqual(plan.child_id, OMAR.student_id)
         self.assertEqual(plan.forced_tool, RECORDS_TOOL)
@@ -523,12 +529,26 @@ class AWholeConversationThroughThePlanner(unittest.TestCase):
         self.addCleanup(set_profile, None)
         self.chat = _Conversation(
             [
-                {"student_id": "S-1", "full_name_ar": "ليلى أحمد", "full_name_en": "Layla Ahmed",
-                 "gender": "female", "year_level": "Year 4"},
-                {"student_id": "S-2", "full_name_ar": "عمر أحمد", "full_name_en": "Omar Ahmed",
-                 "gender": "male", "year_level": "Year 6"},
-                {"student_id": "S-3", "full_name_ar": "سارة أحمد", "full_name_en": "Sara Ahmed",
-                 "gender": "female"},
+                {
+                    "student_id": "S-1",
+                    "full_name_ar": "ليلى أحمد",
+                    "full_name_en": "Layla Ahmed",
+                    "gender": "female",
+                    "year_level": "Year 4",
+                },
+                {
+                    "student_id": "S-2",
+                    "full_name_ar": "عمر أحمد",
+                    "full_name_en": "Omar Ahmed",
+                    "gender": "male",
+                    "year_level": "Year 6",
+                },
+                {
+                    "student_id": "S-3",
+                    "full_name_ar": "سارة أحمد",
+                    "full_name_en": "Sara Ahmed",
+                    "gender": "female",
+                },
             ]
         )
         self.addCleanup(self.chat.close)

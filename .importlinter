@@ -1,0 +1,124 @@
+# The dependency rule, enforced instead of documented.
+#
+#   PYTHONPATH=src lint-imports
+#
+# Scope: the NEW packages only. Step 6A creates domain/, infrastructure/, bootstrap/ and the
+# context packages under application/, and polices them from the moment they exist. The code
+# that has not moved yet - agent/, api/, assets/, db/, indexing/, infra/, jobs/ - is
+# deliberately outside every contract below, because a rule that has to be suppressed for two
+# hundred existing edges teaches nobody anything. Step 6G is where the last of it moves in and
+# the contracts close over the whole package.
+#
+# Two mechanics worth knowing before editing this file, both established by experiment rather
+# than from the documentation:
+#   - `independence` follows indirect chains, including ones that pass through a third package,
+#     and prints the whole chain when it breaks.
+#   - `protected` only catches DIRECT imports, so it is a weaker guarantee than its name
+#     suggests. Where the rule must hold through a chain, `independence` is the type to reach
+#     for.
+# And one trap, which runs in the direction that looks like safety: `layers` ERRORS on a
+# module that does not exist, but `forbidden` PASSES VACUOUSLY on one - internal or external,
+# installed or not. A misspelled name in a forbidden list therefore guards nothing, and says
+# nothing. Check each new entry by planting a probe import and watching the contract break.
+#
+# Nor does this tool need the packages it names to be installed: it reads source statically.
+# It passes with every contract below from an environment holding only the dev group, which
+# is why CI installs that group alone to run it.
+
+[importlinter]
+root_packages =
+    backend
+include_external_packages = True
+
+[importlinter:contract:layers]
+name = The layers depend inwards, and only bootstrap knows all of them
+type = layers
+layers =
+    backend.bootstrap
+    backend.infrastructure
+    backend.application
+    backend.domain
+# Higher may import lower, never the reverse. So domain imports nothing here, application
+# imports domain, infrastructure implements against both, and bootstrap sees everything.
+# `api/` is absent on purpose: it is the estate's name for the presentation layer in all three
+# sibling services and it already exists, so it joins this contract in 6G rather than being
+# renamed to presentation/ for the sake of the plan's original diagram.
+exhaustive = False
+
+[importlinter:contract:domain-is-pure]
+name = The domain talks to nothing
+type = forbidden
+source_modules =
+    backend.domain
+forbidden_modules =
+    fastapi
+    starlette
+    sqlalchemy
+    alembic
+    langchain
+    langchain_core
+    langgraph
+    redis
+    pymilvus
+    httpx
+    requests
+    openai
+    psycopg2
+    jinja2
+    boto3
+    minio
+# Pydantic is deliberately NOT here. The sibling domains already use it
+# (sis/domain/value_objects.py, sis/domain/grades.py), and a validated value object is a
+# domain concept whichever library spells it.
+
+[importlinter:contract:the-agent-context-is-not-the-agent-framework]
+name = Neither the domain nor the use cases may import the graph framework
+type = forbidden
+source_modules =
+    backend.domain
+    backend.application
+forbidden_modules =
+    langgraph
+    langchain
+    langchain_core
+# This is the contract that pays for the name. `domain/agent/` is named after a mechanism it
+# is forbidden to contain: in this product "agent" is ubiquitous language - SERVICES.md calls
+# the service "chat agent + RAG", and `agent.tools` is a profile field - so the word stays, and
+# the thing it could be confused with is banned outright instead. The LangGraph agent is an
+# adapter and belongs in infrastructure/.
+
+[importlinter:contract:use-cases-do-not-reach-for-adapters]
+name = The use cases depend on ports, never on what implements them
+type = forbidden
+source_modules =
+    backend.application
+forbidden_modules =
+    backend.infrastructure
+
+[importlinter:contract:the-shared-kernel-is-a-leaf]
+name = The shared kernel knows neither context
+type = forbidden
+source_modules =
+    backend.domain.shared
+forbidden_modules =
+    backend.domain.agent
+    backend.domain.corpus
+# Anything the kernel would need from a context is not shared; it belongs to that context.
+
+[importlinter:contract:the-domain-contexts-are-independent]
+name = The turn's rules and the corpus's rules do not know each other
+type = independence
+modules =
+    backend.domain.agent
+    backend.domain.corpus
+
+[importlinter:contract:the-application-contexts-are-independent]
+name = The turn's use cases and the corpus's use cases do not know each other
+type = independence
+modules =
+    backend.application.agent
+    backend.application.corpus
+# These two are what make `agent` a boundary rather than a label: a boundary is something CI
+# can tell you that you broke. They pass trivially today because both sides are empty, and
+# that is the point - they are in place BEFORE the code arrives, so the first edge that would
+# cross them is refused rather than discovered later.

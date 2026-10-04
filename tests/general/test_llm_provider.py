@@ -8,6 +8,7 @@ harmless: an unset selector (which has to remain a total no-op for every deploym
 predating this) and a blank value inside a block (which has to fall through rather than
 resolve to an empty model id).
 """
+
 import logging
 import os
 import unittest
@@ -66,8 +67,12 @@ class ResolutionTests(unittest.TestCase):
         """
         with env(
             LLM_PROVIDER="together",
-            TOGETHER_API_KEY="tgp", TOGETHER_BASE_URL="https://together", TOGETHER_MODEL="m-tog",
-            ARK_API_KEY="generic", BASE_URL="https://generic", MODEL="m-generic",
+            TOGETHER_API_KEY="tgp",
+            TOGETHER_BASE_URL="https://together",
+            TOGETHER_MODEL="m-tog",
+            ARK_API_KEY="generic",
+            BASE_URL="https://generic",
+            MODEL="m-generic",
         ):
             resolution = apply_provider_env()
             self.assertEqual("tgp", os.environ["ARK_API_KEY"])
@@ -78,8 +83,12 @@ class ResolutionTests(unittest.TestCase):
     def test_switching_back_to_groq_reaches_the_groq_block(self):
         """Both blocks stay written; the selector is the only thing that moves."""
         both = dict(
-            GROQ_API_KEY="gsk", GROQ_BASE_URL="https://groq", GROQ_MODEL="m-groq",
-            TOGETHER_API_KEY="tgp", TOGETHER_BASE_URL="https://together", TOGETHER_MODEL="m-tog",
+            GROQ_API_KEY="gsk",
+            GROQ_BASE_URL="https://groq",
+            GROQ_MODEL="m-groq",
+            TOGETHER_API_KEY="tgp",
+            TOGETHER_BASE_URL="https://together",
+            TOGETHER_MODEL="m-tog",
         )
         with env(LLM_PROVIDER="groq", **both):
             apply_provider_env()
@@ -91,8 +100,11 @@ class ResolutionTests(unittest.TestCase):
         """A model id both providers serve stays written once, not once per block."""
         with env(
             LLM_PROVIDER="together",
-            TOGETHER_API_KEY="tgp", TOGETHER_BASE_URL="https://together",
-            MODEL="shared", FAST_MODEL="shared-fast", GRADE_MODEL="shared-grade",
+            TOGETHER_API_KEY="tgp",
+            TOGETHER_BASE_URL="https://together",
+            MODEL="shared",
+            FAST_MODEL="shared-fast",
+            GRADE_MODEL="shared-grade",
         ):
             resolution = apply_provider_env()
             self.assertEqual("shared", os.environ["MODEL"])
@@ -102,8 +114,9 @@ class ResolutionTests(unittest.TestCase):
 
     def test_a_blank_block_value_falls_through(self):
         """`TOGETHER_MODEL=` means "not set here", not "the empty model id"."""
-        with env(LLM_PROVIDER="together", TOGETHER_API_KEY="tgp", TOGETHER_MODEL="   ",
-                 MODEL="shared"):
+        with env(
+            LLM_PROVIDER="together", TOGETHER_API_KEY="tgp", TOGETHER_MODEL="   ", MODEL="shared"
+        ):
             apply_provider_env()
             self.assertEqual("shared", os.environ["MODEL"])
 
@@ -133,8 +146,12 @@ class VisionTests(unittest.TestCase):
         """The shipped arrangement: text on Together, vision deliberately left on Groq."""
         with env(
             LLM_PROVIDER="together",
-            TOGETHER_API_KEY="tgp", TOGETHER_BASE_URL="https://together", TOGETHER_MODEL="m-tog",
-            VISION_MODEL="vl", VISION_API_KEY="gsk", VISION_BASE_URL="https://groq",
+            TOGETHER_API_KEY="tgp",
+            TOGETHER_BASE_URL="https://together",
+            TOGETHER_MODEL="m-tog",
+            VISION_MODEL="vl",
+            VISION_API_KEY="gsk",
+            VISION_BASE_URL="https://groq",
         ):
             apply_provider_env()
             self.assertEqual("vl", os.environ["VISION_MODEL"])
@@ -144,7 +161,8 @@ class VisionTests(unittest.TestCase):
     def test_a_block_can_move_vision_onto_the_live_provider(self):
         with env(
             LLM_PROVIDER="together",
-            TOGETHER_API_KEY="tgp", TOGETHER_VISION_MODEL="tog-vl",
+            TOGETHER_API_KEY="tgp",
+            TOGETHER_VISION_MODEL="tog-vl",
             VISION_MODEL="groq-vl",
         ):
             apply_provider_env()
@@ -156,10 +174,13 @@ class VisionTests(unittest.TestCase):
         one place and not the other."""
         with env(
             LLM_PROVIDER="together",
-            TOGETHER_API_KEY="tgp", TOGETHER_BASE_URL="https://together",
+            TOGETHER_API_KEY="tgp",
+            TOGETHER_BASE_URL="https://together",
             TOGETHER_VISION_MODEL="tog-vl",
             # The leftovers from when vision lived on the other provider.
-            VISION_MODEL="groq-vl", VISION_API_KEY="gsk", VISION_BASE_URL="https://groq",
+            VISION_MODEL="groq-vl",
+            VISION_API_KEY="gsk",
+            VISION_BASE_URL="https://groq",
         ):
             resolution = apply_provider_env()
             self.assertEqual("tog-vl", os.environ["VISION_MODEL"])
@@ -172,16 +193,15 @@ class VisionTests(unittest.TestCase):
         the same one its text models use."""
         with env(LLM_PROVIDER="groq", GROQ_API_KEY="gsk", GROQ_VISION_MODEL="gsk-vl"):
             apply_provider_env()
-            self.assertEqual(
-                "https://api.groq.com/openai/v1", os.environ["VISION_BASE_URL"]
-            )
+            self.assertEqual("https://api.groq.com/openai/v1", os.environ["VISION_BASE_URL"])
 
     def test_an_explicit_vision_key_still_beats_the_inherited_one(self):
         """A provider that issues a separate credential for its vision tier is a real
         thing, and naming it outright is more specific than inheriting."""
         with env(
             LLM_PROVIDER="together",
-            TOGETHER_API_KEY="tgp-text", TOGETHER_VISION_MODEL="tog-vl",
+            TOGETHER_API_KEY="tgp-text",
+            TOGETHER_VISION_MODEL="tog-vl",
             TOGETHER_VISION_API_KEY="tgp-vision",
         ):
             apply_provider_env()
@@ -193,8 +213,11 @@ class VisionTests(unittest.TestCase):
         quietly drag it along."""
         with env(
             LLM_PROVIDER="together",
-            TOGETHER_API_KEY="tgp", TOGETHER_BASE_URL="https://together",
-            VISION_MODEL="groq-vl", VISION_API_KEY="gsk", VISION_BASE_URL="https://groq",
+            TOGETHER_API_KEY="tgp",
+            TOGETHER_BASE_URL="https://together",
+            VISION_MODEL="groq-vl",
+            VISION_API_KEY="gsk",
+            VISION_BASE_URL="https://groq",
         ):
             apply_provider_env()
             self.assertEqual("groq-vl", os.environ["VISION_MODEL"])
@@ -206,8 +229,13 @@ class NoOpTests(unittest.TestCase):
     """An unset selector has to leave a pre-`LLM_PROVIDER` deployment untouched."""
 
     def test_nothing_is_written_when_the_selector_is_unset(self):
-        with env(ARK_API_KEY="legacy", BASE_URL="https://legacy", MODEL="m-legacy",
-                 GROQ_API_KEY="gsk", TOGETHER_API_KEY="tgp"):
+        with env(
+            ARK_API_KEY="legacy",
+            BASE_URL="https://legacy",
+            MODEL="m-legacy",
+            GROQ_API_KEY="gsk",
+            TOGETHER_API_KEY="tgp",
+        ):
             before = dict(os.environ)
             self.assertIsNone(apply_provider_env())
             self.assertEqual(before, dict(os.environ))
@@ -218,8 +246,12 @@ class DiagnosticTests(unittest.TestCase):
     both present and free of the key it resolved."""
 
     def test_it_names_the_provider_the_model_and_the_endpoint(self):
-        with env(LLM_PROVIDER="together", TOGETHER_API_KEY="tgp-secret",
-                 TOGETHER_BASE_URL="https://together", TOGETHER_MODEL="m-tog"):
+        with env(
+            LLM_PROVIDER="together",
+            TOGETHER_API_KEY="tgp-secret",
+            TOGETHER_BASE_URL="https://together",
+            TOGETHER_MODEL="m-tog",
+        ):
             apply_provider_env()
             with self.assertLogs("backend.llm_provider", level=logging.INFO) as captured:
                 log_provider_status()
@@ -233,8 +265,12 @@ class DiagnosticTests(unittest.TestCase):
     def test_it_says_whether_voice_notes_have_a_model(self):
         """Voice notes are the one feature whose setting an older `.env` cannot have, so
         the boot line reports it either way rather than only when it is present."""
-        with env(LLM_PROVIDER="together", TOGETHER_API_KEY="k", TOGETHER_MODEL="m",
-                 TOGETHER_TRANSCRIPTION_MODEL="whisper-large-v3"):
+        with env(
+            LLM_PROVIDER="together",
+            TOGETHER_API_KEY="k",
+            TOGETHER_MODEL="m",
+            TOGETHER_TRANSCRIPTION_MODEL="whisper-large-v3",
+        ):
             apply_provider_env()
             with self.assertLogs("backend.llm_provider", level=logging.INFO) as captured:
                 log_provider_status()

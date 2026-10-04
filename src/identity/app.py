@@ -17,6 +17,7 @@ That is also where the misconfigurations are caught. A signing key that cannot b
 a school with no WhatsApp number, a SIS base URL with no key — each stops the deploy here,
 rather than surfacing as one parent's login failing at eight in the morning.
 """
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -144,7 +145,7 @@ async def lifespan(app: FastAPI):
     app.state.signing_key = signing_key_from(resolved)
     # Force the load here rather than lazily. A key that cannot be read must stop the
     # deploy, not the first sign-in.
-    app.state.signing_key.kid
+    app.state.signing_key.kid  # noqa: B018 - the access IS the load, see above
 
     app.state.token_issuer = JwtTokenIssuer(
         key=app.state.signing_key,

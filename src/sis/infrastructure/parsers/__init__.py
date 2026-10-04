@@ -9,16 +9,7 @@ Neither half validates anything about a school. Resolving a class code, checking
 open and refusing a duplicate enrolment all belong to the services, after parsing, where
 the outcome is visible as a row the registrar can read.
 """
-from sis.infrastructure.parsers.grades import GRADE_COLUMNS, SpreadsheetGradeParser
-from sis.infrastructure.parsers.guardians import (
-    GUARDIAN_COLUMNS,
-    SpreadsheetGuardianParser,
-)
-from sis.infrastructure.parsers.roster import (
-    ROSTER_COLUMNS,
-    SpreadsheetFamilyRosterParser,
-    SpreadsheetRosterParser,
-)
+
 from sis.infrastructure.parsers.columns import (
     ACADEMIC_YEAR_CODE,
     CAN_VIEW_RECORDS,
@@ -47,6 +38,16 @@ from sis.infrastructure.parsers.columns import (
     map_columns,
     normalise_digits,
     normalise_header,
+)
+from sis.infrastructure.parsers.grades import GRADE_COLUMNS, SpreadsheetGradeParser
+from sis.infrastructure.parsers.guardians import (
+    GUARDIAN_COLUMNS,
+    SpreadsheetGuardianParser,
+)
+from sis.infrastructure.parsers.roster import (
+    ROSTER_COLUMNS,
+    SpreadsheetFamilyRosterParser,
+    SpreadsheetRosterParser,
 )
 from sis.infrastructure.parsers.workbook import (
     MAX_CELL_CHARS,

@@ -5,6 +5,7 @@ with fakes, which is what lets them move time: a session's inactivity window is 
 and the interesting behaviour — a token that slides, a replay caught days later, a family
 pruned — is all about what happens after longer than a test can wait.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -57,7 +58,12 @@ class FakeRefreshTokens:
         if row is None:
             return None
         return RefreshTokenRecord(
-            row.account_id, row.token_hash, row.family_id, row.expires_at, row.revoked_at, row.rotated_at
+            row.account_id,
+            row.token_hash,
+            row.family_id,
+            row.expires_at,
+            row.revoked_at,
+            row.rotated_at,
         )
 
     def mark_rotated(self, token_hash, *, replaced_by_hash, at):
@@ -74,7 +80,11 @@ class FakeRefreshTokens:
     def revoke_family(self, account_id, family_id):
         count = 0
         for row in self.rows.values():
-            if row.account_id == account_id and row.family_id == family_id and row.revoked_at is None:
+            if (
+                row.account_id == account_id
+                and row.family_id == family_id
+                and row.revoked_at is None
+            ):
                 row.revoked_at = START
                 count += 1
         return count
@@ -84,8 +94,10 @@ class FakeRefreshTokens:
 
     def prune(self, account_id, *, dead_before, now):
         dead = [
-            key for key, row in self.rows.items()
-            if row.account_id == account_id and (
+            key
+            for key, row in self.rows.items()
+            if row.account_id == account_id
+            and (
                 row.expires_at <= now
                 or (row.revoked_at is not None and row.revoked_at < dead_before)
                 or (row.rotated_at is not None and row.rotated_at < dead_before)
@@ -128,9 +140,17 @@ class FakeAudit:
 
 
 PARENT = SimpleNamespace(
-    id=7, username="0501234567", phone="", password_hash="x", role="parent",
-    guardian_external_id="G-1", display_name="Umm Layla", preferred_language="ar",
-    is_active=True, failed_attempts=0, locked_until=None,
+    id=7,
+    username="0501234567",
+    phone="",
+    password_hash="x",
+    role="parent",
+    guardian_external_id="G-1",
+    display_name="Umm Layla",
+    preferred_language="ar",
+    is_active=True,
+    failed_attempts=0,
+    locked_until=None,
 )
 
 
@@ -151,14 +171,18 @@ def world():
         accounts=FakeAccounts(),
         refresh_tokens=tokens,
         audit=audit,
-        hasher=SimpleNamespace(verify=lambda *a: True, needs_rehash=lambda h: False, dummy_hash="d"),
+        hasher=SimpleNamespace(
+            verify=lambda *a: True, needs_rehash=lambda h: False, dummy_hash="d"
+        ),
         issuer=FakeIssuer(clock),
         lockout=LockoutPolicy(max_failed_attempts=8, lockout_minutes=15),
         refresh_reuse_grace_seconds=60,
         clock=clock,
     )
     session = service.issue_session(PARENT)
-    return SimpleNamespace(service=service, tokens=tokens, audit=audit, clock=clock, first=session.refresh_token)
+    return SimpleNamespace(
+        service=service, tokens=tokens, audit=audit, clock=clock, first=session.refresh_token
+    )
 
 
 def test_a_refresh_spends_the_token_and_issues_a_new_one_in_the_same_family(world):
@@ -201,7 +225,9 @@ def test_a_retry_inside_the_grace_window_is_honoured(world):
 
     assert retried.refresh_token
     family = world.tokens.find(FakeIssuer.hash_refresh_token(world.first)).family_id
-    assert world.tokens.find(FakeIssuer.hash_refresh_token(retried.refresh_token)).family_id == family
+    assert (
+        world.tokens.find(FakeIssuer.hash_refresh_token(retried.refresh_token)).family_id == family
+    )
 
 
 def test_a_replay_after_the_grace_window_revokes_the_whole_family(world):
@@ -224,7 +250,7 @@ def test_the_grace_window_is_measured_from_the_first_exchange(world):
     world.service.refresh(refresh_token=world.first)
     world.clock.advance(seconds=50)
     world.service.refresh(refresh_token=world.first)  # a retry, honoured
-    world.clock.advance(seconds=50)                    # 100s after the FIRST exchange
+    world.clock.advance(seconds=50)  # 100s after the FIRST exchange
 
     with pytest.raises(NotAuthorized):
         world.service.refresh(refresh_token=world.first)
@@ -268,8 +294,16 @@ def test_a_token_from_before_rotation_existed_is_a_family_of_one(world):
     """Rows written by the previous release carry no family. They keep working, and are
     rotated into a family on their first refresh."""
     legacy_hash = FakeIssuer.hash_refresh_token("legacy")
-    world.tokens.issue(account_id=PARENT.id, token_hash=legacy_hash, expires_at=START + REFRESH_TTL, family_id=legacy_hash)
+    world.tokens.issue(
+        account_id=PARENT.id,
+        token_hash=legacy_hash,
+        expires_at=START + REFRESH_TTL,
+        family_id=legacy_hash,
+    )
 
     issued = world.service.refresh(refresh_token="legacy")
 
-    assert world.tokens.find(FakeIssuer.hash_refresh_token(issued.refresh_token)).family_id == legacy_hash
+    assert (
+        world.tokens.find(FakeIssuer.hash_refresh_token(issued.refresh_token)).family_id
+        == legacy_hash
+    )

@@ -9,6 +9,7 @@ not to a year, and only the academic year names the school. Most of these tests 
 pin down what happens when one of those hops comes back empty, because "not known" has
 to stay distinguishable from "Year 1".
 """
+
 from datetime import date
 
 import pytest
@@ -29,42 +30,96 @@ def family(uow_factory):
     """One mother, three children: one placed in Year 4, one in Year 2, one not yet."""
     with uow_factory() as uow:
         uow.schools.upsert_many([School(code="MAIN", name_en="Main", name_ar="الرئيسية")])
-        uow.academic_years.upsert_many([
-            AcademicYear(
-                code="2025-2026", school_code="MAIN", name_en="2025-2026",
-                name_ar="٢٠٢٥-٢٠٢٦", starts_on=date(2025, 9, 1),
-                ends_on=date(2026, 6, 30), is_current=True,
-            )
-        ])
-        uow.year_levels.upsert_many([
-            YearLevel(code="Y4", school_code="MAIN", name_en="Year 4",
-                      name_ar="الصف الرابع", display_order=4),
-            YearLevel(code="Y2", school_code="MAIN", name_en="Year 2",
-                      name_ar="الصف الثاني", display_order=2),
-        ])
-        uow.class_sections.upsert_many([
-            ClassSection(code="4B", academic_year_code="2025-2026", year_level_code="Y4",
-                         name_en="4B", name_ar="٤ب"),
-            ClassSection(code="2A", academic_year_code="2025-2026", year_level_code="Y2",
-                         name_en="2A", name_ar="٢أ"),
-        ])
-        uow.students.upsert_many([
-            Student(student_number=StudentNumber("S001"), full_name_ar="علي", full_name_en="Ali"),
-            Student(student_number=StudentNumber("S002"), full_name_ar="ليلى", full_name_en="Layla"),
-            Student(student_number=StudentNumber("S003"), full_name_ar="سارة", full_name_en="Sara"),
-        ])
-        uow.enrolments.upsert_many([
-            ClassEnrolment(student_number=StudentNumber("S001"), academic_year_code="2025-2026",
-                           class_code="4B", starts_on=date(2025, 9, 1)),
-            ClassEnrolment(student_number=StudentNumber("S002"), academic_year_code="2025-2026",
-                           class_code="2A", starts_on=date(2025, 9, 1)),
-        ])
+        uow.academic_years.upsert_many(
+            [
+                AcademicYear(
+                    code="2025-2026",
+                    school_code="MAIN",
+                    name_en="2025-2026",
+                    name_ar="٢٠٢٥-٢٠٢٦",
+                    starts_on=date(2025, 9, 1),
+                    ends_on=date(2026, 6, 30),
+                    is_current=True,
+                )
+            ]
+        )
+        uow.year_levels.upsert_many(
+            [
+                YearLevel(
+                    code="Y4",
+                    school_code="MAIN",
+                    name_en="Year 4",
+                    name_ar="الصف الرابع",
+                    display_order=4,
+                ),
+                YearLevel(
+                    code="Y2",
+                    school_code="MAIN",
+                    name_en="Year 2",
+                    name_ar="الصف الثاني",
+                    display_order=2,
+                ),
+            ]
+        )
+        uow.class_sections.upsert_many(
+            [
+                ClassSection(
+                    code="4B",
+                    academic_year_code="2025-2026",
+                    year_level_code="Y4",
+                    name_en="4B",
+                    name_ar="٤ب",
+                ),
+                ClassSection(
+                    code="2A",
+                    academic_year_code="2025-2026",
+                    year_level_code="Y2",
+                    name_en="2A",
+                    name_ar="٢أ",
+                ),
+            ]
+        )
+        uow.students.upsert_many(
+            [
+                Student(
+                    student_number=StudentNumber("S001"), full_name_ar="علي", full_name_en="Ali"
+                ),
+                Student(
+                    student_number=StudentNumber("S002"), full_name_ar="ليلى", full_name_en="Layla"
+                ),
+                Student(
+                    student_number=StudentNumber("S003"), full_name_ar="سارة", full_name_en="Sara"
+                ),
+            ]
+        )
+        uow.enrolments.upsert_many(
+            [
+                ClassEnrolment(
+                    student_number=StudentNumber("S001"),
+                    academic_year_code="2025-2026",
+                    class_code="4B",
+                    starts_on=date(2025, 9, 1),
+                ),
+                ClassEnrolment(
+                    student_number=StudentNumber("S002"),
+                    academic_year_code="2025-2026",
+                    class_code="2A",
+                    starts_on=date(2025, 9, 1),
+                ),
+            ]
+        )
         uow.guardians.upsert_many([Guardian(phones=(Phone(MOTHER),), full_name_ar="فاطمة")])
-        uow.student_guardians.upsert_many([
-            StudentGuardian(student_number=StudentNumber(n), guardian_phone=Phone(MOTHER),
-                            relationship_type=RelationshipType.MOTHER, can_view_records=True)
-            for n in ("S001", "S002", "S003")
-        ])
+        uow.student_guardians.upsert_many(
+            [
+                StudentGuardian(
+                    student_number=StudentNumber(n),
+                    guardian_phone=Phone(MOTHER),
+                    relationship_type=RelationshipType.MOTHER,
+                    can_view_records=True,
+                )
+                for n in ("S001", "S002", "S003")
+            ]
+        )
         uow.commit()
     return QueryService(uow_factory)
 
@@ -130,8 +185,12 @@ class TestNotKnownStaysNotKnown:
             uow.enrolments.close_open_enrolment(StudentNumber("S001"), ends_on=date(2026, 3, 12))
             uow.commit()
 
-        on_her_last_day = _by_number(family.guardian_students(Phone(MOTHER), on_date=date(2026, 3, 12)))
-        the_day_after = _by_number(family.guardian_students(Phone(MOTHER), on_date=date(2026, 3, 13)))
+        on_her_last_day = _by_number(
+            family.guardian_students(Phone(MOTHER), on_date=date(2026, 3, 12))
+        )
+        the_day_after = _by_number(
+            family.guardian_students(Phone(MOTHER), on_date=date(2026, 3, 13))
+        )
 
         assert on_her_last_day["S001"].year_label == "الصف الرابع"
         assert the_day_after["S001"].year_label == ""
@@ -149,31 +208,60 @@ class TestNotKnownStaysNotKnown:
         back to the room beats falling back to a code, and both beat guessing."""
         with uow_factory() as uow:
             uow.schools.upsert_many([School(code="X", name_en="X", name_ar="س")])
-            uow.academic_years.upsert_many([
-                AcademicYear(code="2025-2026", school_code="X", name_en="y", name_ar="y",
-                             starts_on=date(2025, 9, 1), ends_on=date(2026, 6, 30), is_current=True)
-            ])
+            uow.academic_years.upsert_many(
+                [
+                    AcademicYear(
+                        code="2025-2026",
+                        school_code="X",
+                        name_en="y",
+                        name_ar="y",
+                        starts_on=date(2025, 9, 1),
+                        ends_on=date(2026, 6, 30),
+                        is_current=True,
+                    )
+                ]
+            )
             # A section whose year level was never uploaded.
-            uow.year_levels.upsert_many([
-                YearLevel(code="Y9", school_code="X", name_en="Y9", name_ar="Y9", display_order=9)
-            ])
-            uow.class_sections.upsert_many([
-                ClassSection(code="9C", academic_year_code="2025-2026", year_level_code="Y9",
-                             name_en="9C", name_ar="٩ج")
-            ])
-            uow.students.upsert_many([
-                Student(student_number=StudentNumber("T1"), full_name_ar="ط", full_name_en="T")
-            ])
-            uow.enrolments.upsert_many([
-                ClassEnrolment(student_number=StudentNumber("T1"), academic_year_code="2025-2026",
-                               class_code="9C", starts_on=date(2025, 9, 1))
-            ])
-            uow.guardians.upsert_many([Guardian(phones=(Phone("+201119998888"),), full_name_ar="و")])
-            uow.student_guardians.upsert_many([
-                StudentGuardian(student_number=StudentNumber("T1"),
-                                guardian_phone=Phone("+201119998888"),
-                                relationship_type=RelationshipType.FATHER, can_view_records=True)
-            ])
+            uow.year_levels.upsert_many(
+                [YearLevel(code="Y9", school_code="X", name_en="Y9", name_ar="Y9", display_order=9)]
+            )
+            uow.class_sections.upsert_many(
+                [
+                    ClassSection(
+                        code="9C",
+                        academic_year_code="2025-2026",
+                        year_level_code="Y9",
+                        name_en="9C",
+                        name_ar="٩ج",
+                    )
+                ]
+            )
+            uow.students.upsert_many(
+                [Student(student_number=StudentNumber("T1"), full_name_ar="ط", full_name_en="T")]
+            )
+            uow.enrolments.upsert_many(
+                [
+                    ClassEnrolment(
+                        student_number=StudentNumber("T1"),
+                        academic_year_code="2025-2026",
+                        class_code="9C",
+                        starts_on=date(2025, 9, 1),
+                    )
+                ]
+            )
+            uow.guardians.upsert_many(
+                [Guardian(phones=(Phone("+201119998888"),), full_name_ar="و")]
+            )
+            uow.student_guardians.upsert_many(
+                [
+                    StudentGuardian(
+                        student_number=StudentNumber("T1"),
+                        guardian_phone=Phone("+201119998888"),
+                        relationship_type=RelationshipType.FATHER,
+                        can_view_records=True,
+                    )
+                ]
+            )
             uow.commit()
 
         entries = QueryService(uow_factory).guardian_students(
@@ -189,11 +277,16 @@ class TestItStaysOneQueryPerFamily:
         report where she is, not whichever placement was written first."""
         with uow_factory() as uow:
             uow.enrolments.close_open_enrolment(StudentNumber("S001"), ends_on=date(2026, 2, 28))
-            uow.enrolments.upsert_many([
-                ClassEnrolment(student_number=StudentNumber("S001"),
-                               academic_year_code="2025-2026", class_code="2A",
-                               starts_on=date(2026, 3, 1))
-            ])
+            uow.enrolments.upsert_many(
+                [
+                    ClassEnrolment(
+                        student_number=StudentNumber("S001"),
+                        academic_year_code="2025-2026",
+                        class_code="2A",
+                        starts_on=date(2026, 3, 1),
+                    )
+                ]
+            )
             uow.commit()
 
         found = _by_number(family.guardian_students(Phone(MOTHER), on_date=TERM_TIME))
@@ -203,11 +296,16 @@ class TestItStaysOneQueryPerFamily:
     def test_her_year_before_the_transfer_is_still_the_old_one(self, family, uow_factory):
         with uow_factory() as uow:
             uow.enrolments.close_open_enrolment(StudentNumber("S001"), ends_on=date(2026, 2, 28))
-            uow.enrolments.upsert_many([
-                ClassEnrolment(student_number=StudentNumber("S001"),
-                               academic_year_code="2025-2026", class_code="2A",
-                               starts_on=date(2026, 3, 1))
-            ])
+            uow.enrolments.upsert_many(
+                [
+                    ClassEnrolment(
+                        student_number=StudentNumber("S001"),
+                        academic_year_code="2025-2026",
+                        class_code="2A",
+                        starts_on=date(2026, 3, 1),
+                    )
+                ]
+            )
             uow.commit()
 
         found = _by_number(family.guardian_students(Phone(MOTHER), on_date=date(2026, 1, 15)))

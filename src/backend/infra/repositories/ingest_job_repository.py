@@ -3,6 +3,7 @@
 Timestamps are written as the record carries them rather than stamped here: the tracker
 owns the clock, which is what lets a test say "an hour later" without waiting one.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

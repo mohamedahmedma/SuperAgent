@@ -15,6 +15,7 @@ of what stands between a page and a term's marks.
 So this file pins the separation rather than the convenience: unset means CLOSED, and
 `CORS_ALLOW_ORIGINS` must not open it.
 """
+
 import os
 import unittest
 from unittest.mock import patch
@@ -104,14 +105,10 @@ class ItsOwnListTests(unittest.TestCase):
         strictly worse than advertising either — the browser discards the header and every
         call fails. `sis/app.py` forces credentials off against a wildcard; this holds it.
         """
-        client = build_client(
-            SIS_CORS_ORIGINS="*", SIS_CORS_ALLOW_CREDENTIALS="true"
-        )
+        client = build_client(SIS_CORS_ORIGINS="*", SIS_CORS_ALLOW_CREDENTIALS="true")
         response = preflight(client, "https://anything.example.com")
         self.assertEqual("*", response.headers.get("access-control-allow-origin"))
-        self.assertNotEqual(
-            "true", response.headers.get("access-control-allow-credentials")
-        )
+        self.assertNotEqual("true", response.headers.get("access-control-allow-credentials"))
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ other login — but it is not zero. Treat `IDENTITY_BOOTSTRAP_ADMIN_PASSWORD` as
 change it through the admin routes once the estate is running: seeding skips the account
 from then on, so the value in `.env` stops being the live credential.
 """
+
 from __future__ import annotations
 
 import logging
@@ -90,9 +91,7 @@ def seed_bootstrap_admin(*, username: str, password: str, pbkdf2_rounds: int) ->
             # The ordinary steady state, on every boot after the first. Logged at debug so
             # it does not become noise, but logged, because "why did my password change"
             # and "why did it not" are both questions someone eventually asks.
-            logger.debug(
-                "Bootstrap administrator %r already exists; left untouched.", username
-            )
+            logger.debug("Bootstrap administrator %r already exists; left untouched.", username)
             return
 
         hasher = Pbkdf2PasswordHasher(rounds=pbkdf2_rounds)
@@ -143,9 +142,7 @@ def has_any_admin() -> bool:
     try:
         db = new_session()
         return (
-            db.query(Account.id)
-            .filter(Account.role == _ROLE, Account.is_active.is_(True))
-            .first()
+            db.query(Account.id).filter(Account.role == _ROLE, Account.is_active.is_(True)).first()
             is not None
         )
     except Exception:

@@ -24,6 +24,7 @@ The agent is not in the loop — it would need a live model and it makes no deci
 file is about. What runs is the real turn planner, the real RAG graph, the real routing
 policy and the real prompts, with the resolver and the grader scripted.
 """
+
 import re
 import unittest
 from dataclasses import dataclass, field
@@ -32,14 +33,14 @@ from typing import List, Optional
 from backend.agent.chat.orchestrator import plan_turn
 from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.resolution import CORRECTION, FOLLOWUP, NEW_TOPIC, STANDALONE
-from backend.agent.profiles.registry import load_profile, set_profile
-from backend.agent.prompts import render
-from tests.general.test_rag_short_circuit import FakeStructuredModel, load_pipeline, _meta
-
+from backend.profiles.registry import load_profile, set_profile
+from backend.prompts import render
+from tests.general.test_rag_short_circuit import FakeStructuredModel, _meta, load_pipeline
 
 # ---------------------------------------------------------------------------
 # A corpus with both kinds of section
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Section:
@@ -51,91 +52,195 @@ class Section:
 
 
 CORPUS = [
-    Section("fees-primary", (
-        "Tuition fees 2025/2026. Year 1: 42,000. Year 2: 42,000. Year 3: 45,000. "
-        "Year 4: 45,000. Year 5: 48,000. Year 6: 48,000. Fees are billed per term."
-    ), True),
-    Section("fees-secondary", (
-        "Tuition fees 2025/2026, secondary. Year 7: 55,000. Year 8: 55,000. "
-        "Year 9: 58,000. Year 10: 61,000."
-    ), True),
-    Section("fees-discount", (
-        "Sibling discount: families enrolling two or more children receive 10% off the "
-        "tuition of each additional child. The discount applies at every year group."
-    ), False),
-    Section("fees-payment", (
-        "Payment plans: tuition may be paid in three termly installments or in full "
-        "before the start of the academic year. Installments are available to all families."
-    ), False),
-    Section("uniform-girls", (
-        "Uniform and clothes, day wear for girls up to Grade 6 and Year 6: navy "
-        "pinafore with the school crest, white blouse, navy cardigan. Girls in Grade 7 "
-        "and above wear the navy skirt and blazer."
-    ), True),
-    Section("uniform-boys", (
-        "Uniform and clothes, day wear for boys up to Grade 6 and Year 6: grey "
-        "trousers, white shirt, school tie. Boys in Grade 7 and above wear the blazer."
-    ), True),
-    Section("admission-docs", (
-        "Documents required to apply for admission: the child's birth certificate, a "
-        "copy of the passport, two passport photographs, the most recent school report, "
-        "and an up-to-date vaccination record. The same documents are required for every "
-        "applicant."
-    ), False),
-    Section("transfer-docs", (
-        "Documents required to transfer a student from another school: a transfer "
-        "certificate from the previous school, the last two school reports, the birth "
-        "certificate, and a vaccination record."
-    ), False),
-    Section("medical-policy", (
-        "A medical report is not required at application. A vaccination record is "
-        "required for all students before the first day of term."
-    ), False),
-    Section("transport", (
-        "School transport operates on twelve routes across the city. Seats are allocated "
-        "on application and are available to students in every year group."
-    ), False),
-    Section("transport-fees", (
-        "Transport fee: 8,000 per academic year for a return seat, 5,000 for one way. "
-        "The same fee applies on every route."
-    ), False),
-    Section("calendar-start", (
-        "The school day starts at 07:45 and ends at 14:30. Start time for the gates "
-        "is 07:15. The same times apply to every year group."
-    ), False),
-    Section("calendar-terms", (
-        "Term one ends on 18 December. Term two runs from 6 January to 27 March. "
-        "Term three ends on 25 June."
-    ), False),
-    Section("subjects-3-6", (
-        "Subjects taught in Years 3 to 6: Arabic, English, mathematics, science, "
-        "social studies, Islamic studies, art, music and physical education."
-    ), True),
-    Section("subjects-7-9", (
-        "Subjects taught in Years 7 to 9 add a second language, design technology and "
-        "separate sciences."
-    ), True),
-    Section("grade-placement", (
-        "Grade placement is by age on 1 September: age 4 enters Foundation Stage 2, "
-        "age 5 enters Year 1, age 6 enters Year 2."
-    ), True),
-    Section("contacts", (
-        "Admissions office: admissions@school.example, +20 2 555 0100. The team handles "
-        "applications and transfers for all year groups."
-    ), False),
-    Section("admission-deadline", (
-        "The application deadline is 31 May: applications for the 2025/2026 year close "
-        "then. Late applications are considered only where places remain. The deadline "
-        "is the same for every year group."
-    ), False),
+    Section(
+        "fees-primary",
+        (
+            "Tuition fees 2025/2026. Year 1: 42,000. Year 2: 42,000. Year 3: 45,000. "
+            "Year 4: 45,000. Year 5: 48,000. Year 6: 48,000. Fees are billed per term."
+        ),
+        True,
+    ),
+    Section(
+        "fees-secondary",
+        (
+            "Tuition fees 2025/2026, secondary. Year 7: 55,000. Year 8: 55,000. "
+            "Year 9: 58,000. Year 10: 61,000."
+        ),
+        True,
+    ),
+    Section(
+        "fees-discount",
+        (
+            "Sibling discount: families enrolling two or more children receive 10% off the "
+            "tuition of each additional child. The discount applies at every year group."
+        ),
+        False,
+    ),
+    Section(
+        "fees-payment",
+        (
+            "Payment plans: tuition may be paid in three termly installments or in full "
+            "before the start of the academic year. Installments are available to all families."
+        ),
+        False,
+    ),
+    Section(
+        "uniform-girls",
+        (
+            "Uniform and clothes, day wear for girls up to Grade 6 and Year 6: navy "
+            "pinafore with the school crest, white blouse, navy cardigan. Girls in Grade 7 "
+            "and above wear the navy skirt and blazer."
+        ),
+        True,
+    ),
+    Section(
+        "uniform-boys",
+        (
+            "Uniform and clothes, day wear for boys up to Grade 6 and Year 6: grey "
+            "trousers, white shirt, school tie. Boys in Grade 7 and above wear the blazer."
+        ),
+        True,
+    ),
+    Section(
+        "admission-docs",
+        (
+            "Documents required to apply for admission: the child's birth certificate, a "
+            "copy of the passport, two passport photographs, the most recent school report, "
+            "and an up-to-date vaccination record. The same documents are required for every "
+            "applicant."
+        ),
+        False,
+    ),
+    Section(
+        "transfer-docs",
+        (
+            "Documents required to transfer a student from another school: a transfer "
+            "certificate from the previous school, the last two school reports, the birth "
+            "certificate, and a vaccination record."
+        ),
+        False,
+    ),
+    Section(
+        "medical-policy",
+        (
+            "A medical report is not required at application. A vaccination record is "
+            "required for all students before the first day of term."
+        ),
+        False,
+    ),
+    Section(
+        "transport",
+        (
+            "School transport operates on twelve routes across the city. Seats are allocated "
+            "on application and are available to students in every year group."
+        ),
+        False,
+    ),
+    Section(
+        "transport-fees",
+        (
+            "Transport fee: 8,000 per academic year for a return seat, 5,000 for one way. "
+            "The same fee applies on every route."
+        ),
+        False,
+    ),
+    Section(
+        "calendar-start",
+        (
+            "The school day starts at 07:45 and ends at 14:30. Start time for the gates "
+            "is 07:15. The same times apply to every year group."
+        ),
+        False,
+    ),
+    Section(
+        "calendar-terms",
+        (
+            "Term one ends on 18 December. Term two runs from 6 January to 27 March. "
+            "Term three ends on 25 June."
+        ),
+        False,
+    ),
+    Section(
+        "subjects-3-6",
+        (
+            "Subjects taught in Years 3 to 6: Arabic, English, mathematics, science, "
+            "social studies, Islamic studies, art, music and physical education."
+        ),
+        True,
+    ),
+    Section(
+        "subjects-7-9",
+        (
+            "Subjects taught in Years 7 to 9 add a second language, design technology and "
+            "separate sciences."
+        ),
+        True,
+    ),
+    Section(
+        "grade-placement",
+        (
+            "Grade placement is by age on 1 September: age 4 enters Foundation Stage 2, "
+            "age 5 enters Year 1, age 6 enters Year 2."
+        ),
+        True,
+    ),
+    Section(
+        "contacts",
+        (
+            "Admissions office: admissions@school.example, +20 2 555 0100. The team handles "
+            "applications and transfers for all year groups."
+        ),
+        False,
+    ),
+    Section(
+        "admission-deadline",
+        (
+            "The application deadline is 31 May: applications for the 2025/2026 year close "
+            "then. Late applications are considered only where places remain. The deadline "
+            "is the same for every year group."
+        ),
+        False,
+    ),
 ]
 
 BY_ID = {section.chunk_id: section for section in CORPUS}
 
 _STOP = {
-    "the", "a", "an", "is", "are", "for", "to", "of", "in", "on", "at", "and", "or",
-    "what", "which", "who", "how", "do", "does", "my", "his", "her", "i", "it", "be",
-    "there", "any", "with", "up", "can", "will", "would", "child", "children", "school",
+    "the",
+    "a",
+    "an",
+    "is",
+    "are",
+    "for",
+    "to",
+    "of",
+    "in",
+    "on",
+    "at",
+    "and",
+    "or",
+    "what",
+    "which",
+    "who",
+    "how",
+    "do",
+    "does",
+    "my",
+    "his",
+    "her",
+    "i",
+    "it",
+    "be",
+    "there",
+    "any",
+    "with",
+    "up",
+    "can",
+    "will",
+    "would",
+    "child",
+    "children",
+    "school",
 }
 
 
@@ -180,8 +285,13 @@ def retrieve(query, top_k=5, language=""):
         scored.append((hits / max(1, len(wanted)), section))
     scored.sort(key=lambda pair: pair[0], reverse=True)
     docs = [
-        {"filename": f"{section.chunk_id}.md", "page_number": 1,
-         "text": section.text, "chunk_id": section.chunk_id, "score": score}
+        {
+            "filename": f"{section.chunk_id}.md",
+            "page_number": 1,
+            "text": section.text,
+            "chunk_id": section.chunk_id,
+            "score": score,
+        }
         for score, section in scored[:top_k]
     ]
     return {"docs": docs, "meta": _meta(len(docs))}
@@ -190,6 +300,7 @@ def retrieve(query, top_k=5, language=""):
 # ---------------------------------------------------------------------------
 # A grader that behaves the way the prompt now asks one to
 # ---------------------------------------------------------------------------
+
 
 class ScriptedGrader:
     """Reads the rendered grading prompt and answers it the way the template asks.
@@ -220,14 +331,21 @@ class ScriptedGrader:
         wanted = _terms(question)
         scored = sorted(
             ((len(wanted & _terms(s.text)), s) for s in cited),
-            key=lambda pair: pair[0], reverse=True,
+            key=lambda pair: pair[0],
+            reverse=True,
         )
         on_subject = [(hits, s) for hits, s in scored if hits >= 2]
 
         if not on_subject:
-            return {"relevance": "none", "answerability": "none", "ambiguity": "none",
-                    "route": "no_knowledge", "confidence": 0.9,
-                    "constraints_discriminate": "unknown", "supporting_chunks": []}
+            return {
+                "relevance": "none",
+                "answerability": "none",
+                "ambiguity": "none",
+                "route": "no_knowledge",
+                "confidence": 0.9,
+                "constraints_discriminate": "unknown",
+                "supporting_chunks": [],
+            }
 
         # The rule the template states: relevance is judged against the QUESTION alone,
         # never penalised for material that does not mention a carried condition.
@@ -239,15 +357,21 @@ class ScriptedGrader:
             # a question about admission documents is not what the answer rests on, and
             # letting it vote would report the answer as year-specific when it is not.
             discriminate = "yes" if on_subject[0][1].varies_by_condition else "no"
-        return {"relevance": "strong", "answerability": "sufficient", "ambiguity": "none",
-                "route": "answer", "confidence": 0.85,
-                "constraints_discriminate": discriminate,
-                "supporting_chunks": supporting}
+        return {
+            "relevance": "strong",
+            "answerability": "sufficient",
+            "ambiguity": "none",
+            "route": "answer",
+            "confidence": 0.85,
+            "constraints_discriminate": discriminate,
+            "supporting_chunks": supporting,
+        }
 
 
 # ---------------------------------------------------------------------------
 # The conversation harness
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Turn:
@@ -285,8 +409,12 @@ class Conversation:
             plan, signals = plan_turn(
                 text, list(self.history), ctx, resolve_invoke=lambda *a: payload
             )
-            turn = Turn(text=text, resolved=plan.resolved_question or text,
-                        constraints=list(plan.carried_constraints), intent=signals.followup_intent)
+            turn = Turn(
+                text=text,
+                resolved=plan.resolved_question or text,
+                constraints=list(plan.carried_constraints),
+                intent=signals.followup_intent,
+            )
 
             # A social turn, or a confirmed out-of-domain one. Either way the knowledge
             # tool is unbound, so nothing searches — modelling it as a search would be
@@ -319,14 +447,15 @@ class Conversation:
     def _tool_result(self, result, trace, ctx) -> str:
         status = trace.get("retrieval_status")
         if status in ("no_knowledge", "retrieval_error") or not result.get("docs"):
-            return render("tools/knowledge_result.j2",
-                          outcome="no_knowledge" if status == "no_knowledge" else "empty")
+            return render(
+                "tools/knowledge_result.j2",
+                outcome="no_knowledge" if status == "no_knowledge" else "empty",
+            )
         return render(
             "tools/knowledge_result.j2",
             outcome="chunks",
             chunks="\n\n".join(
-                f"[{i}] {d['filename']}:\n{d['text']}"
-                for i, d in enumerate(result["docs"], 1)
+                f"[{i}] {d['filename']}:\n{d['text']}" for i, d in enumerate(result["docs"], 1)
             ),
             rewritten=bool(trace.get("rewrite_method")),
             partial=status == "partial",
@@ -355,12 +484,19 @@ class TwentyTurnConversationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         profile = load_profile("base")
-        set_profile(profile.model_copy(update={
-            "agent": profile.agent.model_copy(update={"request_envelope_enabled": False}),
-            "rag": profile.rag.model_copy(update={
-                "scope_index_enabled": False, "domain_gate_enabled": False,
-            }),
-        }))
+        set_profile(
+            profile.model_copy(
+                update={
+                    "agent": profile.agent.model_copy(update={"request_envelope_enabled": False}),
+                    "rag": profile.rag.model_copy(
+                        update={
+                            "scope_index_enabled": False,
+                            "domain_gate_enabled": False,
+                        }
+                    ),
+                }
+            )
+        )
         cls.grader = ScriptedGrader()
         cls.pipeline = load_pipeline(retrieve_documents=retrieve)
         # The grading seam, substituted where the pipeline reaches for it.
@@ -371,70 +507,127 @@ class TwentyTurnConversationTests(unittest.TestCase):
         cls.chat = chat
 
         # 1-2 — the pair that established the mechanism.
-        chat.ask("what is the clothes for children under year 6",
-                 resolved="what is the school uniform for children up to Year 6",
-                 constraints=UP_TO_6, intent=STANDALONE)
-        chat.ask("and what is the fees for this years",
-                 resolved="what are the school tuition fees for the years up to Year 6",
-                 constraints=UP_TO_6, intent=FOLLOWUP)
+        chat.ask(
+            "what is the clothes for children under year 6",
+            resolved="what is the school uniform for children up to Year 6",
+            constraints=UP_TO_6,
+            intent=STANDALONE,
+        )
+        chat.ask(
+            "and what is the fees for this years",
+            resolved="what are the school tuition fees for the years up to Year 6",
+            constraints=UP_TO_6,
+            intent=FOLLOWUP,
+        )
         # 3 — the reported failure: general material, inherited condition.
-        chat.ask("what document to apply for them",
-                 resolved="what documents are required to apply for admission for children up to Year 6",
-                 constraints=UP_TO_6, intent=FOLLOWUP)
+        chat.ask(
+            "what document to apply for them",
+            resolved="what documents are required to apply for admission for children up to Year 6",
+            constraints=UP_TO_6,
+            intent=FOLLOWUP,
+        )
         # 4-5
-        chat.ask("is there a discount if i have two children",
-                 resolved="is there a sibling discount on tuition for two children",
-                 constraints=UP_TO_6, intent=FOLLOWUP)
-        chat.ask("my child is 5 years old, which grade is that",
-                 resolved="which grade is a child aged 5 placed in",
-                 constraints=AGE_5, intent=FOLLOWUP)
+        chat.ask(
+            "is there a discount if i have two children",
+            resolved="is there a sibling discount on tuition for two children",
+            constraints=UP_TO_6,
+            intent=FOLLOWUP,
+        )
+        chat.ask(
+            "my child is 5 years old, which grade is that",
+            resolved="which grade is a child aged 5 placed in",
+            constraints=AGE_5,
+            intent=FOLLOWUP,
+        )
         # 6-8 — placement, then transfer documents: general again, new condition.
-        chat.ask("and what does that grade cost",
-                 resolved="what is the tuition fee for Year 1",
-                 constraints=AGE_5, intent=FOLLOWUP)
-        chat.ask("what are the required documents to transfer him",
-                 resolved="what documents are required to transfer a student from another school",
-                 constraints=AGE_5, intent=FOLLOWUP)
-        chat.ask("does he need a medical report",
-                 resolved="is a medical report required for a 5 year old applicant",
-                 constraints=AGE_5, intent=FOLLOWUP)
+        chat.ask(
+            "and what does that grade cost",
+            resolved="what is the tuition fee for Year 1",
+            constraints=AGE_5,
+            intent=FOLLOWUP,
+        )
+        chat.ask(
+            "what are the required documents to transfer him",
+            resolved="what documents are required to transfer a student from another school",
+            constraints=AGE_5,
+            intent=FOLLOWUP,
+        )
+        chat.ask(
+            "does he need a medical report",
+            resolved="is a medical report required for a 5 year old applicant",
+            constraints=AGE_5,
+            intent=FOLLOWUP,
+        )
         # 9-10 — back to material that does vary.
-        chat.ask("and what about the uniform for him",
-                 resolved="what is the day wear uniform for boys up to Grade 6",
-                 constraints=AGE_5 + ["boys"], intent=FOLLOWUP)
-        chat.ask("how much is the sibling discount worth",
-                 resolved="how much is the sibling discount on tuition",
-                 constraints=AGE_5, intent=FOLLOWUP)
+        chat.ask(
+            "and what about the uniform for him",
+            resolved="what is the day wear uniform for boys up to Grade 6",
+            constraints=AGE_5 + ["boys"],
+            intent=FOLLOWUP,
+        )
+        chat.ask(
+            "how much is the sibling discount worth",
+            resolved="how much is the sibling discount on tuition",
+            constraints=AGE_5,
+            intent=FOLLOWUP,
+        )
         # 11-14 — general policies.
-        chat.ask("is transport available",
-                 resolved="is school transport available",
-                 constraints=AGE_5, intent=FOLLOWUP)
-        chat.ask("how much does it cost",
-                 resolved="how much does school transport cost per year",
-                 constraints=AGE_5, intent=FOLLOWUP)
-        chat.ask("what time does school start",
-                 resolved="what time does the school day start",
-                 constraints=AGE_5, intent=FOLLOWUP)
-        chat.ask("and when does the term end",
-                 resolved="when does the school term end",
-                 constraints=AGE_5, intent=FOLLOWUP)
+        chat.ask(
+            "is transport available",
+            resolved="is school transport available",
+            constraints=AGE_5,
+            intent=FOLLOWUP,
+        )
+        chat.ask(
+            "how much does it cost",
+            resolved="how much does school transport cost per year",
+            constraints=AGE_5,
+            intent=FOLLOWUP,
+        )
+        chat.ask(
+            "what time does school start",
+            resolved="what time does the school day start",
+            constraints=AGE_5,
+            intent=FOLLOWUP,
+        )
+        chat.ask(
+            "and when does the term end",
+            resolved="when does the school term end",
+            constraints=AGE_5,
+            intent=FOLLOWUP,
+        )
         # 15-16 — varies by year again.
-        chat.ask("what subjects will he study in year 3",
-                 resolved="what subjects are taught in Years 3 to 6",
-                 constraints=["Year 3"], intent=FOLLOWUP)
-        chat.ask("is arabic included",
-                 resolved="is Arabic taught in Years 3 to 6",
-                 constraints=["Year 3"], intent=FOLLOWUP)
+        chat.ask(
+            "what subjects will he study in year 3",
+            resolved="what subjects are taught in Years 3 to 6",
+            constraints=["Year 3"],
+            intent=FOLLOWUP,
+        )
+        chat.ask(
+            "is arabic included",
+            resolved="is Arabic taught in Years 3 to 6",
+            constraints=["Year 3"],
+            intent=FOLLOWUP,
+        )
         # 17-19 — admissions logistics, all general.
-        chat.ask("who do i contact to apply",
-                 resolved="who do I contact in the admissions office to apply",
-                 constraints=["Year 3"], intent=FOLLOWUP)
-        chat.ask("what is the deadline",
-                 resolved="what is the deadline to apply for the 2025/2026 year",
-                 constraints=["Year 3"], intent=FOLLOWUP)
-        chat.ask("can i pay in installments",
-                 resolved="can tuition be paid in installments",
-                 constraints=["Year 3"], intent=FOLLOWUP)
+        chat.ask(
+            "who do i contact to apply",
+            resolved="who do I contact in the admissions office to apply",
+            constraints=["Year 3"],
+            intent=FOLLOWUP,
+        )
+        chat.ask(
+            "what is the deadline",
+            resolved="what is the deadline to apply for the 2025/2026 year",
+            constraints=["Year 3"],
+            intent=FOLLOWUP,
+        )
+        chat.ask(
+            "can i pay in installments",
+            resolved="can tuition be paid in installments",
+            constraints=["Year 3"],
+            intent=FOLLOWUP,
+        )
         # 20 — a pleasantry, which must not be treated as a question.
         chat.ask("thanks", resolved="thanks", constraints=(), intent=NEW_TOPIC)
 
@@ -463,14 +656,17 @@ class TwentyTurnConversationTests(unittest.TestCase):
     def test_no_turn_was_handed_back_to_the_user(self):
         """Every turn inherits its subject from the conversation, so a scope_select
         offering a choice of subjects could not narrow any of them."""
-        asked = [(i, t.text) for i, t in enumerate(self.chat.turns, 1)
-                 if t.route in ("clarify", "scope_select")]
+        asked = [
+            (i, t.text)
+            for i, t in enumerate(self.chat.turns, 1)
+            if t.route in ("clarify", "scope_select")
+        ]
         self.assertEqual([], asked)
 
     # --- turn 3: the reported bug -------------------------------------------
 
     def test_turn_3_answers_the_general_document_list(self):
-        """"what document to apply for them", asked after two Year-6 questions. The
+        """ "what document to apply for them", asked after two Year-6 questions. The
         admissions list does not mention Year 6 anywhere; the shipped system denied it."""
         turn = self.turn(3)
         self.assertEqual("answer", turn.route)
@@ -490,13 +686,16 @@ class TwentyTurnConversationTests(unittest.TestCase):
         question = self.turn(3).grader_prompt.split("User question:", 1)[-1]
         question = question.split("Conditions in force:", 1)[0]
         self.assertNotIn("(", question, "conditions were appended to the question")
-        self.assertIn("Conditions in force:", self.turn(3).grader_prompt,
-                      "they must still reach the grader, as their own field")
+        self.assertIn(
+            "Conditions in force:",
+            self.turn(3).grader_prompt,
+            "they must still reach the grader, as their own field",
+        )
 
     # --- turn 7: the case the user named ------------------------------------
 
     def test_turn_7_answers_transfer_documents_for_a_five_year_old(self):
-        """"required documents to transfer him", where "him" is 5. The transfer list is
+        """ "required documents to transfer him", where "him" is 5. The transfer list is
         one list for every age — an answer, not a reason to refuse."""
         turn = self.turn(7)
         self.assertEqual("answer", turn.route)
@@ -587,7 +786,8 @@ class ConstraintPoisoningTests(unittest.TestCase):
         self.assertEqual("calendar-start", clean["docs"][0]["chunk_id"])
         poisoned_ids = [doc["chunk_id"] for doc in poisoned["docs"]]
         self.assertTrue(
-            not poisoned_ids or poisoned_ids[0] != "calendar-start"
+            not poisoned_ids
+            or poisoned_ids[0] != "calendar-start"
             or poisoned["docs"][0]["score"] < clean["docs"][0]["score"],
             "the condition should measurably dilute a passage that never mentions it",
         )

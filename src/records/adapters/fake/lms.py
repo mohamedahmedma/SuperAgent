@@ -4,6 +4,7 @@ Also the reference for what a correct adapter returns — particularly a subject
 `percentage` and `academic_percentage` differ, which is the case a real adapter is most
 likely to flatten into one number.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

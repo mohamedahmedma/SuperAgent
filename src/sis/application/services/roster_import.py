@@ -29,6 +29,7 @@ Ports only. No sqlalchemy, no fastapi, no `sis.config`: the constructor takes a 
 work factory, a parser, a clock and a TTL, so every rule here is testable with fakes and
 no database.
 """
+
 import hashlib
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -57,19 +58,21 @@ from sis.domain.errors import (
     UnknownReference,
     UploadTooLarge,
 )
+from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
 from sis.domain.imports import (
     ImportBatch,
     ImportKind,
     ImportRow,
+    tally,
+)
+from sis.domain.imports import (
     # The domain's `RowOutcome` is the *write verb* — created, updated, unchanged — while
     # the DTO's is the row report the API returns. Both names are correct in their own
     # module and neither may be renamed from here, so the storage one is aliased and the
     # reported one keeps the name it has in the public return types.
     RowOutcome as StoredOutcome,
-    tally,
 )
 from sis.domain.people import ClassEnrolment, Gender, Student
-from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
 from sis.domain.value_objects import AcademicYearCode, ClassCode, Phone, StudentNumber
 
 __all__ = ["BATCH_FAILURE_ROW_CODE", "RosterImportService"]
@@ -157,19 +160,21 @@ class _Assertion:
             _K_GENDER: str(self.gender),
         }
         if self.guardian_phone is not None:
-            payload.update({
-                _K_GUARDIAN_PHONE: str(self.guardian_phone),
-                _K_GUARDIAN_ALT_PHONE: (
-                    "" if self.guardian_alt_phone is None else str(self.guardian_alt_phone)
-                ),
-                _K_GUARDIAN_NAME_AR: self.guardian_name_ar,
-                _K_GUARDIAN_NAME_EN: self.guardian_name_en,
-                _K_RELATIONSHIP: self.relationship.value,
-                _K_RELATIONSHIP_LABEL: self.relationship_label,
-                _K_PRIMARY: self.is_primary_contact,
-                _K_CAN_VIEW: self.can_view_records,
-                _K_RESTRICTION: self.restriction_note,
-            })
+            payload.update(
+                {
+                    _K_GUARDIAN_PHONE: str(self.guardian_phone),
+                    _K_GUARDIAN_ALT_PHONE: (
+                        "" if self.guardian_alt_phone is None else str(self.guardian_alt_phone)
+                    ),
+                    _K_GUARDIAN_NAME_AR: self.guardian_name_ar,
+                    _K_GUARDIAN_NAME_EN: self.guardian_name_en,
+                    _K_RELATIONSHIP: self.relationship.value,
+                    _K_RELATIONSHIP_LABEL: self.relationship_label,
+                    _K_PRIMARY: self.is_primary_contact,
+                    _K_CAN_VIEW: self.can_view_records,
+                    _K_RESTRICTION: self.restriction_note,
+                }
+            )
         return payload
 
 
@@ -378,9 +383,7 @@ class RosterImportService:
             uow.imports.add(batch, stored)
             uow.commit()
 
-        return ImportPreviewResult.from_rows(
-            batch.batch_id, reports, expires_at=batch.expires_at
-        )
+        return ImportPreviewResult.from_rows(batch.batch_id, reports, expires_at=batch.expires_at)
 
     def _assert_rows(
         self,
@@ -439,11 +442,23 @@ class RosterImportService:
                     guardian_alt_phone=(None if row.guardian is None else row.guardian.alt_phone),
                     guardian_name_ar=("" if row.guardian is None else row.guardian.full_name_ar),
                     guardian_name_en=("" if row.guardian is None else row.guardian.full_name_en),
-                    relationship=(RelationshipType.OTHER if row.guardian is None else row.guardian.relationship_type),
-                    relationship_label=("" if row.guardian is None else row.guardian.relationship_label),
-                    is_primary_contact=(False if row.guardian is None else row.guardian.is_primary_contact),
-                    can_view_records=(True if row.guardian is None else row.guardian.can_view_records),
-                    restriction_note=("" if row.guardian is None else row.guardian.restriction_note),
+                    relationship=(
+                        RelationshipType.OTHER
+                        if row.guardian is None
+                        else row.guardian.relationship_type
+                    ),
+                    relationship_label=(
+                        "" if row.guardian is None else row.guardian.relationship_label
+                    ),
+                    is_primary_contact=(
+                        False if row.guardian is None else row.guardian.is_primary_contact
+                    ),
+                    can_view_records=(
+                        True if row.guardian is None else row.guardian.can_view_records
+                    ),
+                    restriction_note=(
+                        "" if row.guardian is None else row.guardian.restriction_note
+                    ),
                 )
             )
         return assertions, unresolved
@@ -482,15 +497,12 @@ class RosterImportService:
 
             previewed = uow.imports.list_rows(batch_id)
             assertions, replayed = self._replay(previewed)
-            approved = {
-                row.line_number: row.outcome for row in previewed if row.is_written
-            }
+            approved = {row.line_number: row.outcome for row in previewed if row.is_written}
             snapshot = self._load(uow, assertions)
 
             seen: dict[str, int] = {}
             plans = [
-                self._reconcile(self._evaluate(a, snapshot, seen), approved)
-                for a in assertions
+                self._reconcile(self._evaluate(a, snapshot, seen), approved) for a in assertions
             ]
             self._apply(uow, plans)
 
@@ -503,9 +515,7 @@ class RosterImportService:
         reports = sorted((_restore(row) for row in stored), key=lambda r: r.line)
         return ImportCommitResult.from_rows(batch_id, reports, committed_at=now)
 
-    def _replay(
-        self, rows: Sequence[ImportRow]
-    ) -> tuple[list[_Assertion], list[ImportRow]]:
+    def _replay(self, rows: Sequence[ImportRow]) -> tuple[list[_Assertion], list[ImportRow]]:
         """Rebuild an assertion per writable row; carry every other row through untouched.
 
         Rows the registrar saw rejected stay rejected with the code she read. Only rows that
@@ -538,7 +548,9 @@ class RosterImportService:
                             None if guardian_phone in (None, "") else Phone(str(guardian_phone))
                         ),
                         guardian_alt_phone=(
-                            None if guardian_alt_phone in (None, "") else Phone(str(guardian_alt_phone))
+                            None
+                            if guardian_alt_phone in (None, "")
+                            else Phone(str(guardian_alt_phone))
                         ),
                         guardian_name_ar=str(row.payload.get(_K_GUARDIAN_NAME_AR, "")),
                         guardian_name_en=str(row.payload.get(_K_GUARDIAN_NAME_EN, "")),
@@ -620,9 +632,7 @@ class RosterImportService:
             links={} if not phones else uow.student_guardians.list_for_students(numbers),
         )
 
-    def _evaluate(
-        self, stated: _Assertion, snapshot: _Snapshot, seen: dict[str, int]
-    ) -> _Plan:
+    def _evaluate(self, stated: _Assertion, snapshot: _Snapshot, seen: dict[str, int]) -> _Plan:
         """The whole rule set for one row. Pure: same inputs, same verdict, no clock, no I/O.
 
         Order is deliberate — a duplicate line is reported as a duplicate even when it also
@@ -682,20 +692,28 @@ class RosterImportService:
         # today's start would rewrite when she joined, and closing-then-reopening the same
         # class would invent a transfer that never happened.
         open_now = next((p for p in placements if p.is_open), None)
-        if open_now is not None and (
-            str(open_now.academic_year_code),
-            str(open_now.class_code),
-        ) == key:
-            return self._with_guardian(_Plan(
-                line=stated.line,
-                payload=payload,
-                code=RowCode.OK,
-                outcome=(
-                    StoredOutcome.UPDATED if student != existing else StoredOutcome.UNCHANGED
+        if (
+            open_now is not None
+            and (
+                str(open_now.academic_year_code),
+                str(open_now.class_code),
+            )
+            == key
+        ):
+            return self._with_guardian(
+                _Plan(
+                    line=stated.line,
+                    payload=payload,
+                    code=RowCode.OK,
+                    outcome=(
+                        StoredOutcome.UPDATED if student != existing else StoredOutcome.UNCHANGED
+                    ),
+                    student=student if student != existing else None,
+                    superseded=existing is not None,
                 ),
-                student=student if student != existing else None,
-                superseded=existing is not None,
-            ), stated, snapshot)
+                stated,
+                snapshot,
+            )
 
         # The same placement already recorded and since closed — a second commit of the
         # same file. Writing it again would be harmless (the repository is keyed on the
@@ -705,13 +723,17 @@ class RosterImportService:
             == (key[0], key[1], stated.starts_on)
             for p in placements
         ):
-            return self._with_guardian(_Plan(
-                line=stated.line,
-                payload=payload,
-                code=RowCode.OK,
-                outcome=StoredOutcome.UNCHANGED,
-                superseded=existing is not None,
-            ), stated, snapshot)
+            return self._with_guardian(
+                _Plan(
+                    line=stated.line,
+                    payload=payload,
+                    code=RowCode.OK,
+                    outcome=StoredOutcome.UNCHANGED,
+                    superseded=existing is not None,
+                ),
+                stated,
+                snapshot,
+            )
 
         close_on: date | None = None
         remaining = placements
@@ -733,7 +755,9 @@ class RosterImportService:
                     field=_K_STARTS,
                 )
             remaining = [
-                p if p is not open_now else ClassEnrolment(
+                p
+                if p is not open_now
+                else ClassEnrolment(
                     student_number=open_now.student_number,
                     academic_year_code=open_now.academic_year_code,
                     class_code=open_now.class_code,
@@ -757,20 +781,22 @@ class RosterImportService:
                 field=_K_STARTS,
             )
 
-        return self._with_guardian(_Plan(
-            line=stated.line,
-            payload=payload,
-            code=RowCode.OK,
-            outcome=StoredOutcome.CREATED if existing is None else StoredOutcome.UPDATED,
-            student=student,
-            enrolment=candidate,
-            close_open_on=close_on,
-            superseded=existing is not None,
-        ), stated, snapshot)
+        return self._with_guardian(
+            _Plan(
+                line=stated.line,
+                payload=payload,
+                code=RowCode.OK,
+                outcome=StoredOutcome.CREATED if existing is None else StoredOutcome.UPDATED,
+                student=student,
+                enrolment=candidate,
+                close_open_on=close_on,
+                superseded=existing is not None,
+            ),
+            stated,
+            snapshot,
+        )
 
-    def _with_guardian(
-        self, plan: _Plan, stated: _Assertion, snapshot: _Snapshot
-    ) -> _Plan:
+    def _with_guardian(self, plan: _Plan, stated: _Assertion, snapshot: _Snapshot) -> _Plan:
         """Attach the adult asserted on this same row to an otherwise valid roster plan."""
         if stated.guardian_phone is None:
             return plan
@@ -813,7 +839,8 @@ class RosterImportService:
         if owner is None:
             guardian = Guardian(
                 phones=tuple(
-                    phone for phone in (stated.guardian_phone, stated.guardian_alt_phone)
+                    phone
+                    for phone in (stated.guardian_phone, stated.guardian_alt_phone)
                     if phone is not None
                 ),
                 full_name_ar=stated.guardian_name_ar,
@@ -822,7 +849,10 @@ class RosterImportService:
         else:
             phones = list(owner.phones)
             known = {str(phone) for phone in phones}
-            if stated.guardian_alt_phone is not None and str(stated.guardian_alt_phone) not in known:
+            if (
+                stated.guardian_alt_phone is not None
+                and str(stated.guardian_alt_phone) not in known
+            ):
                 phones.append(stated.guardian_alt_phone)
             guardian = Guardian(
                 phones=tuple(phones),
@@ -835,8 +865,11 @@ class RosterImportService:
         existing_link = None
         if owner is not None:
             existing_link = next(
-                (link for link in snapshot.links.get(str(stated.number), ())
-                 if owner.reachable_on(link.guardian_phone)),
+                (
+                    link
+                    for link in snapshot.links.get(str(stated.number), ())
+                    if owner.reachable_on(link.guardian_phone)
+                ),
                 None,
             )
         link = StudentGuardian(
@@ -885,11 +918,7 @@ class RosterImportService:
             full_name_ar=existing.full_name_ar or stated.name_ar,
             full_name_en=existing.full_name_en or stated.name_en,
             is_active=existing.is_active,
-            gender=(
-                stated.gender
-                if stated.gender is not Gender.UNSPECIFIED
-                else existing.gender
-            ),
+            gender=(stated.gender if stated.gender is not Gender.UNSPECIFIED else existing.gender),
         )
 
     def _apply(self, uow: UnitOfWork, plans: Sequence[_Plan]) -> None:

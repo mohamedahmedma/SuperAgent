@@ -29,6 +29,7 @@ Generation exists to fill the blank, never to overrule.
 
 Nothing here reads a database, a clock or the environment.
 """
+
 from __future__ import annotations
 
 import re
@@ -75,9 +76,7 @@ STAGE_LETTER: Final[dict[Stage, str]] = {
     Stage.SECONDARY: "ث",
 }
 
-STAGE_BY_LETTER: Final[dict[str, Stage]] = {
-    letter: stage for stage, letter in STAGE_LETTER.items()
-}
+STAGE_BY_LETTER: Final[dict[str, Stage]] = {letter: stage for stage, letter in STAGE_LETTER.items()}
 
 # What a stage is called on screen. The adjective form ("الابتدائي") attaches to a grade —
 # "الصف الأول الابتدائي" — while the noun form ("المرحلة الابتدائية") names the division

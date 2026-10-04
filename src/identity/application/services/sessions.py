@@ -33,6 +33,7 @@ Security Best Current Practice (RFC 9700, §4.14) describes as refresh token rot
   window** honours the retry. Outside it the token was copied, and revoking the family
   signs out the thief and the parent alike — the parent signs in again; the thief cannot.
 """
+
 from __future__ import annotations
 
 import logging
@@ -51,8 +52,6 @@ from identity.application.ports.security import PasswordHasher, TokenIssuer
 from identity.domain.accounts import LockoutPolicy
 from identity.domain.errors import (
     AccountLocked,
-    BadRequest,
-    Conflict,
     NotAuthorized,
 )
 
@@ -111,20 +110,32 @@ class SessionService:
 
         if self._lockout.is_locked(account.locked_until, now=self._clock()):
             self._audit.write(
-                username=username, event="login", reason="locked", succeeded=False, client_ip=client_ip
+                username=username,
+                event="login",
+                reason="locked",
+                succeeded=False,
+                client_ip=client_ip,
             )
             raise AccountLocked()
 
         if not account.is_active:
             self._audit.write(
-                username=username, event="login", reason="inactive", succeeded=False, client_ip=client_ip
+                username=username,
+                event="login",
+                reason="inactive",
+                succeeded=False,
+                client_ip=client_ip,
             )
             raise NotAuthorized()
 
         if not self._hasher.verify(password, account.password_hash):
             self._accounts.register_failure(account, self._lockout, now=self._clock())
             self._audit.write(
-                username=username, event="login", reason="bad_password", succeeded=False, client_ip=client_ip
+                username=username,
+                event="login",
+                reason="bad_password",
+                succeeded=False,
+                client_ip=client_ip,
             )
             raise NotAuthorized()
 
@@ -149,7 +160,11 @@ class SessionService:
         """
         self._hasher.verify(password, self._hasher.dummy_hash)
         self._audit.write(
-            username=username, event="login", reason="unknown_user", succeeded=False, client_ip=client_ip
+            username=username,
+            event="login",
+            reason="unknown_user",
+            succeeded=False,
+            client_ip=client_ip,
         )
         raise NotAuthorized()
 
@@ -193,7 +208,11 @@ class SessionService:
         found = self._refresh.find(presented)
         if found is None or found.revoked_at is not None or found.expires_at <= now:
             self._audit.write(
-                username="", event="refresh", reason="expired_refresh", succeeded=False, client_ip=client_ip
+                username="",
+                event="refresh",
+                reason="expired_refresh",
+                succeeded=False,
+                client_ip=client_ip,
             )
             raise NotAuthorized("Invalid or expired refresh token.")
 
@@ -204,7 +223,11 @@ class SessionService:
         if self._is_replay(found, now):
             self._refresh.revoke_family(found.account_id, found.family_id)
             self._audit.write(
-                username=account.username, event="refresh", reason="refresh_reuse", succeeded=False, client_ip=client_ip
+                username=account.username,
+                event="refresh",
+                reason="refresh_reuse",
+                succeeded=False,
+                client_ip=client_ip,
             )
             logger.warning(
                 "Refresh token replayed for %s; the session family was revoked", account.username
@@ -231,7 +254,11 @@ class SessionService:
             self._refresh.mark_rotated(presented, replaced_by_hash=refresh_hash, at=now)
         self._refresh.prune(account.id, dead_before=now - self.REPLAY_MEMORY, now=now)
         self._audit.write(
-            username=account.username, event="refresh", reason="ok", succeeded=True, client_ip=client_ip
+            username=account.username,
+            event="refresh",
+            reason="ok",
+            succeeded=True,
+            client_ip=client_ip,
         )
         return IssuedAccessToken(
             access_token=access_token,

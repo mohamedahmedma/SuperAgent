@@ -11,6 +11,7 @@ Purely additive; the release before this one runs unchanged against it.
 Revision ID: 0004
 Revises: 0003
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -26,7 +27,9 @@ def upgrade() -> None:
     op.create_table(
         "chat_attachments",
         sa.Column("id", sa.String(length=32), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        ),
         sa.Column("kind", sa.String(length=20), nullable=False),
         sa.Column("sha256", sa.String(length=64), nullable=False),
         sa.Column("storage_uri", sa.Text(), nullable=False),
@@ -38,7 +41,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index("ix_chat_attachments_user_id", "chat_attachments", ["user_id"])
-    op.create_index("ix_chat_attachments_user_created", "chat_attachments", ["user_id", "created_at"])
+    op.create_index(
+        "ix_chat_attachments_user_created", "chat_attachments", ["user_id", "created_at"]
+    )
     op.add_column(
         "chat_messages",
         sa.Column(

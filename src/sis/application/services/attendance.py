@@ -29,7 +29,8 @@ and Wednesday has to be able to *be* Tuesday and then Wednesday, and pinning the
 to whatever today happens to be turns a green suite into one that goes red overnight with
 no commit in between. The default is the real clock, so production wiring says nothing.
 """
-from collections.abc import Callable, Mapping, Sequence
+
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -40,11 +41,12 @@ from sis.domain.errors import UnknownReference, ValidationError
 from sis.domain.people import Student
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
 
-
 _SIS_TIMEZONE = ZoneInfo("Africa/Cairo")
+
 
 def _sis_today() -> date:
     return datetime.now(_SIS_TIMEZONE).date()
+
 
 __all__ = [
     "AttendanceService",
@@ -149,9 +151,7 @@ class AttendanceService:
         identically, and only one of them is a typo the caller can fix.
         """
         with self._uow_factory() as uow:
-            section_ids = uow.class_sections.ids_for(
-                [(str(academic_year_code), str(class_code))]
-            )
+            section_ids = uow.class_sections.ids_for([(str(academic_year_code), str(class_code))])
             section_id = section_ids.get((str(academic_year_code), str(class_code)))
             if section_id is None:
                 raise UnknownReference(
@@ -162,9 +162,7 @@ class AttendanceService:
             # The enrolments come first and decide who is on the register. See the module
             # docstring: built from the marks instead, a half-taken register would read as a
             # small class with perfect attendance.
-            placements = uow.enrolments.roster_on(
-                academic_year_code, class_code, on_date
-            )
+            placements = uow.enrolments.roster_on(academic_year_code, class_code, on_date)
             numbers = [StudentNumber(str(p.student_number)) for p in placements]
             students = uow.students.get_many(numbers) if numbers else {}
             marks = uow.attendance.marks_for_class(section_id, on_date)
@@ -176,9 +174,7 @@ class AttendanceService:
                     mark=marks.get(str(placement.student_number)),
                 )
                 for placement in placements
-                if (
-                    student := students.get(str(placement.student_number))
-                ) is not None
+                if (student := students.get(str(placement.student_number))) is not None
                 and student.is_active
             )
 
@@ -238,9 +234,7 @@ class AttendanceService:
         """
         with self._uow_factory() as uow:
             if uow.students.get(student_number) is None:
-                raise UnknownReference(
-                    f"no student {student_number}", field="student_number"
-                )
+                raise UnknownReference(f"no student {student_number}", field="student_number")
             marks = tuple(
                 uow.attendance.marks_for_student(
                     student_number, from_date=from_date, to_date=to_date
@@ -304,9 +298,7 @@ class AttendanceService:
             )
 
         with self._uow_factory() as uow:
-            section_ids = uow.class_sections.ids_for(
-                [(str(academic_year_code), str(class_code))]
-            )
+            section_ids = uow.class_sections.ids_for([(str(academic_year_code), str(class_code))])
             section_id = section_ids.get((str(academic_year_code), str(class_code)))
             if section_id is None:
                 raise UnknownReference(
@@ -314,26 +306,25 @@ class AttendanceService:
                     field="class_code",
                 )
 
-            placements = uow.enrolments.roster_on(
-                academic_year_code, class_code, on_date
+            placements = uow.enrolments.roster_on(academic_year_code, class_code, on_date)
+            students = (
+                uow.students.get_many([StudentNumber(str(p.student_number)) for p in placements])
+                if placements
+                else {}
             )
-            students = uow.students.get_many(
-                [StudentNumber(str(p.student_number)) for p in placements]
-            ) if placements else {}
             # Deactivation retains the placement as history, but removes the child from
             # the working register and rejects stale browser submissions for that child.
             placed = {
                 str(placement.student_number)
                 for placement in placements
-                if (
-                    student := students.get(str(placement.student_number))
-                ) is not None
+                if (student := students.get(str(placement.student_number))) is not None
                 and student.is_active
             }
             if on_date < today:
                 existing = uow.attendance.marks_for_class(section_id, on_date)
                 invalid = sorted(
-                    number for number, state in states.items()
+                    number
+                    for number, state in states.items()
                     if not (
                         state == AttendanceState.EXCUSED.value
                         and number in existing

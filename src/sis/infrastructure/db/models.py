@@ -22,6 +22,7 @@ Two habits this file keeps throughout:
 Alembic owns this schema (decision 8). Nothing here calls `create_all`; the models are
 the source Alembic autogenerates *from*, not a shortcut around it.
 """
+
 from datetime import date, datetime, time, timezone
 
 from sqlalchemy import (
@@ -108,7 +109,9 @@ class School(Base):
     working_days: Mapped[str] = mapped_column(
         String(80), default="sunday,monday,tuesday,wednesday,thursday", nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class AcademicYear(Base):
@@ -144,7 +147,9 @@ class AcademicYear(Base):
     status: Mapped[str] = mapped_column(
         String(16), default="upcoming", server_default="upcoming", nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -189,9 +194,7 @@ class YearLevel(Base):
     # A label carrying no rules: nothing is barred from a class, term or subject because of
     # it. `unspecified` is what every existing rung was before this column existed, which is
     # why it is the default rather than a guess.
-    stage: Mapped[str] = mapped_column(
-        String(_STAGE_LEN), default="unspecified", nullable=False
-    )
+    stage: Mapped[str] = mapped_column(String(_STAGE_LEN), default="unspecified", nullable=False)
 
     # Which section of the school this rung belongs to (revision 0007). Nullable because
     # every rung predating the column belongs to no stated section, and a school that does
@@ -207,7 +210,9 @@ class YearLevel(Base):
     # something a registrar may retype. Nullable for the same reason as the column above.
     grade_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class ClassSection(Base):
@@ -263,7 +268,9 @@ class ClassSection(Base):
     section_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -319,7 +326,9 @@ class Term(Base):
     # (`TermClosed`), not here: the registrar must still be able to reopen one, and a
     # database that forbids the write forbids the correction too.
     is_closed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -368,7 +377,9 @@ class Subject(Base):
     # Retired subjects are deactivated, never deleted: the grades of the years they were
     # taught in still have to render a subject name.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class SubjectYearLevel(Base):
@@ -415,7 +426,9 @@ class SubjectYearLevel(Base):
     year_level_id: Mapped[int] = mapped_column(
         ForeignKey("year_levels.id", ondelete="CASCADE"), nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class TimetablePeriod(Base):
@@ -470,7 +483,9 @@ class TimetablePeriod(Base):
     # False for break, assembly, prayer: a slot the day contains and no class schedules a
     # lesson into. The only rule it carries; it says nothing about supervision.
     is_teaching: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -582,7 +597,9 @@ class TimetableEntry(Base):
         ForeignKey("teachers.id", ondelete="SET NULL"), nullable=True
     )
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -651,7 +668,9 @@ class Student(Base):
         String(_ADDRESS_LEN), default="", server_default="", nullable=False
     )
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -708,7 +727,9 @@ class Attendance(Base):
     # kind of statement queried months later by somebody who needs to know whether it was
     # taken that morning or corrected in June.
     recorded_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -751,7 +772,9 @@ class Guardian(Base):
     # Left the school's contact list, but the links stay readable. Deletion is refused by
     # the RESTRICT on `student_guardians`, which is intended rather than an obstacle.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -793,7 +816,9 @@ class GuardianPhone(Base):
 
     # Which number identifies this adult. The domain's `Guardian.phones[0]`.
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class StudentGuardian(Base):
@@ -864,7 +889,9 @@ class StudentGuardian(Base):
     # Never rendered to a parent; it exists for the registrar and for an audit.
     restriction_note: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -948,7 +975,9 @@ class ClassEnrolment(Base):
     # Why the child moved: "transfer", "correction", "initial". Free-ish text kept short;
     # a transfer and a fixed typo look identical in the dates alone.
     reason: Mapped[str] = mapped_column(String(64), default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -990,7 +1019,9 @@ class SubjectGrade(Base):
     subject_id: Mapped[int] = mapped_column(
         ForeignKey("subjects.id", ondelete="RESTRICT"), nullable=False
     )
-    term_id: Mapped[int] = mapped_column(ForeignKey("terms.id", ondelete="RESTRICT"), nullable=False)
+    term_id: Mapped[int] = mapped_column(
+        ForeignKey("terms.id", ondelete="RESTRICT"), nullable=False
+    )
     # The class the mark was earned in, frozen at write time. See the class docstring.
     class_section_id: Mapped[int] = mapped_column(
         ForeignKey("class_sections.id", ondelete="RESTRICT"), nullable=False
@@ -1018,7 +1049,9 @@ class SubjectGrade(Base):
     # Which api key / registrar wrote it, and when. A grade is the kind of figure someone
     # will eventually dispute, and "who entered this" must not require reading a log file.
     recorded_by: Mapped[str] = mapped_column(String(120), default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -1035,12 +1068,21 @@ class Assessment(Base):
     __tablename__ = "assessments"
     __table_args__ = (
         UniqueConstraint(
-            "academic_year_code", "class_code", "subject_code", "term_code",
-            "assessment_type", "name", name="uq_assessments_identity",
+            "academic_year_code",
+            "class_code",
+            "subject_code",
+            "term_code",
+            "assessment_type",
+            "name",
+            name="uq_assessments_identity",
         ),
         Index(
-            "ix_assessments_class_lookup", "academic_year_code", "class_code",
-            "subject_code", "term_code", "assessment_type",
+            "ix_assessments_class_lookup",
+            "academic_year_code",
+            "class_code",
+            "subject_code",
+            "term_code",
+            "assessment_type",
         ),
     )
 
@@ -1053,8 +1095,12 @@ class Assessment(Base):
     name: Mapped[str] = mapped_column(String(_NAME_LEN), nullable=False)
     max_points: Mapped[float | None] = mapped_column(Float, nullable=True)
     recorded_by: Mapped[str] = mapped_column(String(120), default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
 
 
 class AssessmentMark(Base):
@@ -1071,14 +1117,22 @@ class AssessmentMark(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    assessment_id: Mapped[int] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False)
-    student_number: Mapped[str] = mapped_column(ForeignKey("students.student_number", ondelete="RESTRICT"), nullable=False)
+    assessment_id: Mapped[int] = mapped_column(
+        ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False
+    )
+    student_number: Mapped[str] = mapped_column(
+        ForeignKey("students.student_number", ondelete="RESTRICT"), nullable=False
+    )
     points: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_points: Mapped[float | None] = mapped_column(Float, nullable=True)
     percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_absent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
 
 
 class ImportBatch(Base):
@@ -1125,7 +1179,9 @@ class ImportBatch(Base):
     # ever read whole.
     counts: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -1166,7 +1222,9 @@ class ImportRow(Base):
     # without re-reading the upload the client no longer holds.
     payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
-    outcome: Mapped[str] = mapped_column(String(16), default=RowOutcome.CREATED.value, nullable=False)
+    outcome: Mapped[str] = mapped_column(
+        String(16), default=RowOutcome.CREATED.value, nullable=False
+    )
     # `SisError.code` for a rejection, the outcome's own value otherwise. Same closed
     # vocabulary as the API returns, so renaming one is a breaking change.
     code: Mapped[str] = mapped_column(String(40), default=RowOutcome.CREATED.value, nullable=False)
@@ -1174,7 +1232,9 @@ class ImportRow(Base):
     # Which column was at fault; NULL when the failure is not about one cell.
     field: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
     batch: Mapped["ImportBatch"] = relationship("ImportBatch", back_populates="rows", lazy="raise")
 
@@ -1211,7 +1271,9 @@ class ApiKey(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class AccessAudit(Base):
@@ -1326,24 +1388,34 @@ class SecondaryEducationSystem(Base):
     __tablename__ = "secondary_education_systems"
     __table_args__ = (
         UniqueConstraint("school_id", "key", name="uq_secondary_systems_school_key"),
-        CheckConstraint("key IN ('general_secondary', 'egyptian_baccalaureate')", name="ck_secondary_system_key"),
+        CheckConstraint(
+            "key IN ('general_secondary', 'egyptian_baccalaureate')", name="ck_secondary_system_key"
+        ),
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), nullable=False)
+    school_id: Mapped[int] = mapped_column(
+        ForeignKey("schools.id", ondelete="CASCADE"), nullable=False
+    )
     key: Mapped[str] = mapped_column(String(32), nullable=False)
     name_en: Mapped[str] = mapped_column(String(_NAME_LEN), nullable=False)
     name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class SecondaryTrack(Base):
     """A stable specialization key beneath one stored secondary education system."""
 
     __tablename__ = "secondary_tracks"
-    __table_args__ = (UniqueConstraint("education_system_id", "key", name="uq_secondary_tracks_system_key"),)
+    __table_args__ = (
+        UniqueConstraint("education_system_id", "key", name="uq_secondary_tracks_system_key"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    education_system_id: Mapped[int] = mapped_column(ForeignKey("secondary_education_systems.id", ondelete="CASCADE"), nullable=False, index=True)
+    education_system_id: Mapped[int] = mapped_column(
+        ForeignKey("secondary_education_systems.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     key: Mapped[str] = mapped_column(String(48), nullable=False)
     name_en: Mapped[str] = mapped_column(String(_NAME_LEN), nullable=False)
     name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), nullable=False)
@@ -1359,7 +1431,9 @@ class SecondaryTrackGrade(Base):
         CheckConstraint("grade_number IN (1, 2, 3)", name="ck_secondary_track_grade_number"),
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    secondary_track_id: Mapped[int] = mapped_column(ForeignKey("secondary_tracks.id", ondelete="CASCADE"), nullable=False, index=True)
+    secondary_track_id: Mapped[int] = mapped_column(
+        ForeignKey("secondary_tracks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     grade_number: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
@@ -1400,9 +1474,7 @@ class PermissionRow(Base):
     __tablename__ = "permissions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(
-        String(_PERMISSION_CODE_LEN), unique=True, nullable=False
-    )
+    code: Mapped[str] = mapped_column(String(_PERMISSION_CODE_LEN), unique=True, nullable=False)
     name_en: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
     name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
 
@@ -1434,15 +1506,15 @@ class UserPermissionOverride(Base):
 
     __tablename__ = "user_permission_overrides"
     __table_args__ = (
-        UniqueConstraint("user_id", "permission_id", name="uq_user_permission_overrides_user_permission"),
+        UniqueConstraint(
+            "user_id", "permission_id", name="uq_user_permission_overrides_user_permission"
+        ),
         CheckConstraint("effect IN ('allow', 'deny')", name="ck_user_permission_overrides_effect"),
         Index("ix_user_permission_overrides_user", "user_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     permission_id: Mapped[int] = mapped_column(
         ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False
     )
@@ -1470,25 +1542,35 @@ class AuditLog(Base):
     entity_id: Mapped[str] = mapped_column(String(128), nullable=False)
     old_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     new_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class StudentDocument(Base):
     __tablename__ = "student_documents"
     __table_args__ = (Index("ix_student_documents_student_active", "student_id", "deleted_at"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="RESTRICT"), nullable=False)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="RESTRICT"), nullable=False
+    )
     document_type: Mapped[str] = mapped_column(String(64), nullable=False)
     file_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     uploaded_by: Mapped[str] = mapped_column(String(64), nullable=False)
-    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(24), default="unverified", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -1525,12 +1607,8 @@ class User(Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     failed_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    locked_until: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    last_login_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
@@ -1563,9 +1641,7 @@ class UserRole(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role_id: Mapped[int] = mapped_column(
         ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -1600,9 +1676,7 @@ class UserSession(Base):
     )
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     client_ip: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
@@ -1743,9 +1817,7 @@ class TeacherClassSection(Base):
     subject_id: Mapped[int] = mapped_column(
         ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    assigned_by: Mapped[str] = mapped_column(
-        String(_USERNAME_LEN), default="", nullable=False
-    )
+    assigned_by: Mapped[str] = mapped_column(String(_USERNAME_LEN), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
@@ -1783,7 +1855,9 @@ class ChatConversation(Base):
     __table_args__ = (
         UniqueConstraint("school_id", "group_key", name="uq_chat_conversations_group"),
         UniqueConstraint(
-            "school_id", "direct_user_one_id", "direct_user_two_id",
+            "school_id",
+            "direct_user_one_id",
+            "direct_user_two_id",
             name="uq_chat_conversations_direct_pair",
         ),
         CheckConstraint("kind IN ('group', 'direct')", name="chat_conversations_kind"),
@@ -1811,7 +1885,9 @@ class ChatConversation(Base):
     )
     title_en: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     title_ar: Mapped[str] = mapped_column(String(255), default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
@@ -1834,7 +1910,9 @@ class ChatMessage(Base):
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     original_body: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1860,16 +1938,16 @@ class ChatAttachment(Base):
     mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class ChatReceipt(Base):
     """Delivery/read state for one intended recipient, snapshotted when sent."""
 
     __tablename__ = "chat_receipts"
-    __table_args__ = (
-        Index("ix_chat_receipts_user_delivery", "user_id", "delivered_at"),
-    )
+    __table_args__ = (Index("ix_chat_receipts_user_delivery", "user_id", "delivered_at"),)
 
     message_id: Mapped[int] = mapped_column(
         ForeignKey("chat_messages.id", ondelete="CASCADE"), primary_key=True
@@ -1957,9 +2035,7 @@ class SystemSetting(Base):
     # Shown to everyone who is refused, because a refusal with no reason generates a
     # phone call to the same administrator.
     note: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    updated_by: Mapped[str] = mapped_column(
-        String(_USERNAME_LEN), default="", nullable=False
-    )
+    updated_by: Mapped[str] = mapped_column(String(_USERNAME_LEN), default="", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )

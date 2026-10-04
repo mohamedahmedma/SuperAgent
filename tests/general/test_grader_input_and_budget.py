@@ -25,16 +25,17 @@ gone and the bound moved to where the size is MADE, which is what the first clas
 now pins: no chunk larger than the evidence window, therefore no grading prompt larger
 than `top_k` times it, whatever the corpus contains.
 """
+
 import unittest
 from unittest.mock import patch
 
-from backend.indexing.document_loader import DocumentLoader
-from backend.llm_models import GRADE_RETRY_MAX_TOKENS
-from backend.agent.profiles import get_profile
 from backend.agent.rag.evidence import AssessmentContext, Certainty
 from backend.agent.rag.evidence_view import format_docs
 from backend.agent.rag.pipeline import EvidenceGrade, LLMGraderAssessor
 from backend.agent.rag.utils import EVIDENCE_WINDOW_CHARS, _parent_window
+from backend.indexing.document_loader import DocumentLoader
+from backend.llm_models import GRADE_RETRY_MAX_TOKENS
+from backend.profiles import get_profile
 
 
 def _figure_doc(rows: int = 300) -> dict:
@@ -80,10 +81,19 @@ class TheGradingPromptIsSizedByTheRetrieval(unittest.TestCase):
         """The chunk that killed the grading call. Its transcription is now indexed as
         passages, none of them larger than a leaf."""
         units = [
-            unit for unit in self.loader._blocks_to_units([
-                {"type": "text", "content": "joined", "page_number": 0,
-                 "asset_ids": ["kb.docx::p0::imgabc"], "figure": _calendar_parts()},
-            ]) if unit["kind"] == "figure"
+            unit
+            for unit in self.loader._blocks_to_units(
+                [
+                    {
+                        "type": "text",
+                        "content": "joined",
+                        "page_number": 0,
+                        "asset_ids": ["kb.docx::p0::imgabc"],
+                        "figure": _calendar_parts(),
+                    },
+                ]
+            )
+            if unit["kind"] == "figure"
         ]
 
         self.assertGreater(len(units), 1)
@@ -168,8 +178,12 @@ class _Grader:
 
 
 _GRADE = EvidenceGrade(
-    relevance="strong", answerability="sufficient", ambiguity="none",
-    constraints_discriminate="no", route="answer", confidence=0.9,
+    relevance="strong",
+    answerability="sufficient",
+    ambiguity="none",
+    constraints_discriminate="no",
+    route="answer",
+    confidence=0.9,
 )
 
 
@@ -178,8 +192,10 @@ class ATruncatedGradeIsRetriedNotSurrendered(unittest.TestCase):
         def _model(*, headroom: bool = False):
             return second if headroom else first
 
-        with patch("backend.agent.rag.pipeline._get_grader_model", _model), \
-             patch("backend.agent.rag.pipeline._TRUNCATED_RESPONSE", (_Truncated,)):
+        with (
+            patch("backend.agent.rag.pipeline._get_grader_model", _model),
+            patch("backend.agent.rag.pipeline._TRUNCATED_RESPONSE", (_Truncated,)),
+        ):
             return LLMGraderAssessor().assess(
                 AssessmentContext(
                     question="ايه لبس المدرسة؟",

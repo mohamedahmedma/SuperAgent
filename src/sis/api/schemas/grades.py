@@ -21,6 +21,7 @@ Nothing here totals, averages or ranks (invariant 5). A caller wanting an averag
 stating a policy about how a school judges children, and it must state it somewhere a
 human can see, not receive one from this service as if it were a fact.
 """
+
 from typing import Annotated, Self
 
 from pydantic import Field, computed_field
@@ -85,10 +86,12 @@ class SubjectGradeOut(ResponseModel):
 
     subject_code: CodeStr = Field(description="Subject this mark is for.", examples=["MATH"])
     subject_name_en: str | None = Field(
-        default=None, description="English subject label, or null if the subject row could not be loaded."
+        default=None,
+        description="English subject label, or null if the subject row could not be loaded.",
     )
     subject_name_ar: str | None = Field(
-        default=None, description="Arabic subject label, or null if the subject row could not be loaded."
+        default=None,
+        description="Arabic subject label, or null if the subject row could not be loaded.",
     )
     percentage: PercentageValue | None = Field(
         default=None,
@@ -100,7 +103,8 @@ class SubjectGradeOut(ResponseModel):
         examples=[78.5, None],
     )
     points: float | None = Field(
-        default=None, description="Raw points, when the school stated them ('17 out of 20'). Null if not."
+        default=None,
+        description="Raw points, when the school stated them ('17 out of 20'). Null if not.",
     )
     max_points: float | None = Field(
         default=None, description="The maximum those points were out of. Null if not stated."
@@ -151,7 +155,9 @@ class StudentGradesResponse(ResponseModel):
     that silently drops its ungraded lines is a report card nobody can tell is incomplete.
     """
 
-    student_number: CodeStr = Field(description="The join key `records/` matches on.", examples=["10432"])
+    student_number: CodeStr = Field(
+        description="The join key `records/` matches on.", examples=["10432"]
+    )
     full_name_ar: str = Field(description="Full name in Arabic.")
     full_name_en: str = Field(description="Full name in English.")
     term_code: CodeStr = Field(description="Term reported on.", examples=["2026-T1"])

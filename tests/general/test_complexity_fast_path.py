@@ -5,6 +5,7 @@ question that misses the fast path reaches the planner, which may split it into 
 four sub-questions, and EACH sub-question pays its own retrieval plus its own grader
 call. A plain lookup can quietly cost five model calls instead of one.
 """
+
 import unittest
 
 import backend.agent.rag.pipeline as pipeline
@@ -42,7 +43,11 @@ class SingularAndPluralTests(unittest.TestCase):
     def test_a_wh_question_opening_on_a_copula_is_simple(self):
         """Caught by the pattern rather than a literal marker — these phrasings are
         open-ended, so enumerating every one of them in the vocabulary is hopeless."""
-        for question in ("what were the results", "when does the term start", "who does the transport"):
+        for question in (
+            "what were the results",
+            "when does the term start",
+            "who does the transport",
+        ):
             with self.subTest(question=question):
                 self.assertEqual(
                     "obvious_simple_fast_path:wh_attribute_question",
@@ -122,7 +127,7 @@ class ArabicBehaviourTests(unittest.TestCase):
 
 class ProfileWiringTests(unittest.TestCase):
     def test_the_override_list_is_profile_data(self):
-        from backend.agent.profiles.registry import load_profile
+        from backend.profiles.registry import load_profile
 
         markers = load_profile("base").rag.simple_override_markers
         self.assertIn("how many", markers)
@@ -131,7 +136,7 @@ class ProfileWiringTests(unittest.TestCase):
     def test_the_planner_prompt_tells_the_model_to_prefer_simple(self):
         """Decomposition costs a retrieval and a grader call per sub-question, so the
         prompt has to say that rather than leaving it to taste."""
-        from backend.agent.prompts import render
+        from backend.prompts import render
 
         prompt = render("rag/complexity.j2", question="q").lower()
         self.assertIn("default to simple", prompt)

@@ -4,9 +4,10 @@ Split out of the old single `schemas.py` by feature, matching the routers. Nothi
 is imported by `application/` or `domain/` — these are the wire format, and a use case
 that returned one would have the JSON field names as part of its signature.
 """
+
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class LoginIn(BaseModel):

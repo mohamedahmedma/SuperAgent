@@ -7,6 +7,7 @@ chunks, asset dossiers — so every thread that touched the cache was held for a
 Redis stayed stalled. These run the real client against a socket that accepts and never
 answers.
 """
+
 import socket
 import threading
 import time

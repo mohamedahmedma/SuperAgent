@@ -16,6 +16,7 @@ provider and whose vision model is on another is common, and the earlier code co
 not express it — it always sent the main provider's key to whatever VISION_MODEL
 named, which fails confusingly rather than clearly.
 """
+
 from __future__ import annotations
 
 import json
@@ -155,7 +156,9 @@ _RETRY_AFTER_RE = re.compile(r"try again in\s*([\d.]+)\s*(ms|s|m)?", re.IGNORECA
 
 
 def is_rate_limit_error(exc: BaseException) -> bool:
-    status = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+    status = getattr(exc, "status_code", None) or getattr(
+        getattr(exc, "response", None), "status_code", None
+    )
     if status in (429, 413):
         return True
     text = str(exc).lower()
@@ -207,7 +210,10 @@ def call_with_rate_limit_retry(operation, config, description: str = "vision cal
             delay = min(retry_after_seconds(exc, base * attempt), ceiling)
             logger.warning(
                 "%s hit a rate limit (attempt %d/%d); waiting %.1fs",
-                description, attempt, attempts, delay,
+                description,
+                attempt,
+                attempts,
+                delay,
             )
             time.sleep(delay)
     raise RuntimeError(f"{description} exhausted its retries")  # pragma: no cover
@@ -217,7 +223,8 @@ def _message_text(result: Any) -> str:
     content = getattr(result, "content", result)
     if isinstance(content, list):
         content = "".join(
-            block.get("text", "") for block in content
+            block.get("text", "")
+            for block in content
             if isinstance(block, dict) and block.get("type") == "text"
         )
     return strip_reasoning(str(content or ""))
@@ -252,7 +259,7 @@ def _extract_json_object(text: str) -> Optional[dict]:
                 depth -= 1
                 if depth == 0:
                     try:
-                        return json.loads(text[start:index + 1])
+                        return json.loads(text[start : index + 1])
                     except ValueError:
                         break
         start = text.find("{", start + 1)
@@ -298,8 +305,12 @@ def invoke_structured(model, schema: Type, messages: list, prompt_index: int = 0
                 if method is None
                 else model.with_structured_output(schema, method=method)
             )
+            # The lambda is invoked synchronously inside this iteration, before `bound`
+            # is rebound, so the late binding B023 warns about cannot happen here.
             return call_with_rate_limit_retry(
-                lambda: bound.invoke(messages), config, f"structured output ({label})"
+                lambda: bound.invoke(messages),  # noqa: B023
+                config,
+                f"structured output ({label})",
             )
         except Exception as exc:  # provider rejection, or an unparsable response
             if is_rate_limit_error(exc):
@@ -339,7 +350,8 @@ def invoke_structured(model, schema: Type, messages: list, prompt_index: int = 0
         usage = getattr(result, "usage_metadata", None) or {}
         hint = (
             " The response was TRUNCATED — raise assets.figures.vision_max_output_tokens."
-            if finish == "length" else ""
+            if finish == "length"
+            else ""
         )
         raise RuntimeError(
             "Structured output failed on every method and no JSON object was found "
@@ -357,7 +369,7 @@ def vision_status(profile=None) -> dict:
     the heuristic path forever. This turns that into one line in the boot log.
     """
     if profile is None:
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         profile = get_profile()
 

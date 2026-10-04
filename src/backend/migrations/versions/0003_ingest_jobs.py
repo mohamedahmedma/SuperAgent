@@ -10,6 +10,7 @@ Purely additive, so the release before this one runs unchanged against it.
 Revision ID: 0003
 Revises: 0002
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa

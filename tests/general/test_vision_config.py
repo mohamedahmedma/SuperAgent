@@ -5,6 +5,7 @@ absent, and extraction degrades to the heuristic path forever without anything s
 so. These tests pin the fallback chain, the separate-provider case, and the startup
 diagnostic that makes the degraded state visible.
 """
+
 import logging
 import os
 import unittest
@@ -17,12 +18,16 @@ from backend.assets.vision import (
     resolve_vision_credentials,
     vision_status,
 )
-from backend.agent.profiles.registry import load_profile
+from backend.profiles.registry import load_profile
 
 # Everything the resolver reads, cleared so a real .env cannot leak into a test.
 VISION_ENV = {
-    "VISION_MODEL": "", "VISION_API_KEY": "", "VISION_BASE_URL": "",
-    "MODEL": "", "ARK_API_KEY": "", "BASE_URL": "",
+    "VISION_MODEL": "",
+    "VISION_API_KEY": "",
+    "VISION_BASE_URL": "",
+    "MODEL": "",
+    "ARK_API_KEY": "",
+    "BASE_URL": "",
 }
 
 
@@ -32,8 +37,14 @@ def env(**overrides):
 
 class ResolutionTests(unittest.TestCase):
     def test_vision_specific_variables_win(self):
-        with env(VISION_MODEL="vl-1", VISION_API_KEY="vk", VISION_BASE_URL="https://vision",
-                 MODEL="text-1", ARK_API_KEY="tk", BASE_URL="https://text"):
+        with env(
+            VISION_MODEL="vl-1",
+            VISION_API_KEY="vk",
+            VISION_BASE_URL="https://vision",
+            MODEL="text-1",
+            ARK_API_KEY="tk",
+            BASE_URL="https://text",
+        ):
             creds = resolve_vision_credentials()
         self.assertEqual("vl-1", creds.model_id)
         self.assertEqual("vk", creds.api_key)
@@ -51,9 +62,14 @@ class ResolutionTests(unittest.TestCase):
     def test_a_vision_model_on_a_different_provider_is_expressible(self):
         """The case the old per-module resolution could not express: it always sent
         the text provider's key to whatever VISION_MODEL named."""
-        with env(MODEL="text-1", ARK_API_KEY="tk", BASE_URL="https://text",
-                 VISION_MODEL="claude-vision", VISION_API_KEY="anthropic-key",
-                 VISION_BASE_URL="https://anthropic"):
+        with env(
+            MODEL="text-1",
+            ARK_API_KEY="tk",
+            BASE_URL="https://text",
+            VISION_MODEL="claude-vision",
+            VISION_API_KEY="anthropic-key",
+            VISION_BASE_URL="https://anthropic",
+        ):
             creds = resolve_vision_credentials()
         self.assertEqual("claude-vision", creds.model_id)
         self.assertEqual("anthropic-key", creds.api_key)
@@ -61,8 +77,7 @@ class ResolutionTests(unittest.TestCase):
 
     def test_settings_fall_back_independently(self):
         """Only the model differs; the key and endpoint still come from the text side."""
-        with env(MODEL="text-1", ARK_API_KEY="tk", BASE_URL="https://text",
-                 VISION_MODEL="vl-1"):
+        with env(MODEL="text-1", ARK_API_KEY="tk", BASE_URL="https://text", VISION_MODEL="vl-1"):
             creds = resolve_vision_credentials()
         self.assertEqual("vl-1", creds.model_id)
         self.assertEqual("tk", creds.api_key)
@@ -87,9 +102,13 @@ class ResolutionTests(unittest.TestCase):
 
     def test_the_description_never_leaks_the_key(self):
         """describe() reaches logs."""
-        creds = VisionCredentials(model_id="vl", api_key="sk-super-secret",
-                                  base_url="https://x", model_source="VISION_MODEL",
-                                  key_source="VISION_API_KEY")
+        creds = VisionCredentials(
+            model_id="vl",
+            api_key="sk-super-secret",
+            base_url="https://x",
+            model_source="VISION_MODEL",
+            key_source="VISION_API_KEY",
+        )
         described = creds.describe()
         self.assertNotIn("sk-super-secret", described)
         self.assertIn("VISION_API_KEY", described)
@@ -199,14 +218,15 @@ class SingleSourceOfTruthTests(unittest.TestCase):
             if path.name == "vision.py":
                 continue
             text = path.read_text(encoding="utf-8")
-            for match in re.finditer(r'os\.getenv\(\s*["\'](VISION_\w+|ARK_API_KEY|MODEL|BASE_URL)', text):
+            for match in re.finditer(
+                r'os\.getenv\(\s*["\'](VISION_\w+|ARK_API_KEY|MODEL|BASE_URL)', text
+            ):
                 offenders.append(f"{path.name}: {match.group(1)}")
         self.assertEqual([], offenders)
 
     def test_every_builder_degrades_without_credentials(self):
         from backend.assets.entity_extractor import HeuristicEntityExtractor, build_entity_extractor
         from backend.assets.extractors import HeuristicExtractor, build_extractor
-
         from tests.general.test_entity_pipeline import shop_profile
 
         profile = shop_profile()
@@ -218,13 +238,14 @@ class SingleSourceOfTruthTests(unittest.TestCase):
 
         with env():
             self.assertIsInstance(build_extractor(figures), HeuristicExtractor)
-            self.assertIsInstance(build_entity_extractor(entities, schema), HeuristicEntityExtractor)
+            self.assertIsInstance(
+                build_entity_extractor(entities, schema), HeuristicEntityExtractor
+            )
 
     def test_every_builder_activates_with_credentials(self):
+        from backend.assets.attributes import build_attribute_schema
         from backend.assets.entity_extractor import VisionEntityExtractor, build_entity_extractor
         from backend.assets.extractors import VisionExtractor, build_extractor
-        from backend.assets.attributes import build_attribute_schema
-
         from tests.general.test_entity_pipeline import shop_profile
 
         profile = shop_profile()
@@ -253,11 +274,14 @@ class RateLimitRetryTests(unittest.TestCase):
     what silently stripped every figure out of a document."""
 
     def setUp(self):
-        from backend.agent.profiles.registry import load_profile as _load
+        from backend.profiles.registry import load_profile as _load
 
         self.config = _load("base").assets.figures.model_copy(
-            update={"vision_retry_attempts": 3, "vision_retry_base_seconds": 0.01,
-                    "vision_retry_max_seconds": 0.05}
+            update={
+                "vision_retry_attempts": 3,
+                "vision_retry_base_seconds": 0.01,
+                "vision_retry_max_seconds": 0.05,
+            }
         )
 
     def _error(self, message, status=None):
@@ -276,15 +300,21 @@ class RateLimitRetryTests(unittest.TestCase):
     def test_the_body_is_the_reliable_discriminator(self):
         from backend.assets.vision import is_rate_limit_error
 
-        self.assertTrue(is_rate_limit_error(self._error(
-            "Error code: 413 - rate_limit_exceeded on tokens per minute (TPM): Limit 8000"
-        )))
+        self.assertTrue(
+            is_rate_limit_error(
+                self._error(
+                    "Error code: 413 - rate_limit_exceeded on tokens per minute (TPM): Limit 8000"
+                )
+            )
+        )
         self.assertTrue(is_rate_limit_error(self._error("Too Many Requests")))
 
     def test_ordinary_failures_are_not_mistaken_for_quota(self):
         from backend.assets.vision import is_rate_limit_error
 
-        self.assertFalse(is_rate_limit_error(self._error("model does not support json_schema", status=400)))
+        self.assertFalse(
+            is_rate_limit_error(self._error("model does not support json_schema", status=400))
+        )
         self.assertFalse(is_rate_limit_error(self._error("connection reset")))
 
     def test_the_providers_stated_delay_is_honoured(self):
@@ -351,8 +381,9 @@ class RateLimitRetryTests(unittest.TestCase):
         model.with_structured_output.return_value = bound
 
         with self.assertRaises(RuntimeError):
-            invoke_structured(model, FigureExtraction, [{"role": "user", "content": "x"}],
-                              config=self.config)
+            invoke_structured(
+                model, FigureExtraction, [{"role": "user", "content": "x"}], config=self.config
+            )
         # json_schema only — never re-bound for function_calling.
         self.assertEqual(1, model.with_structured_output.call_count)
 
@@ -365,8 +396,10 @@ class VisionParameterTests(unittest.TestCase):
 
         with _patch("langchain.chat_models.init_chat_model") as init:
             build_vision_model(
-                0.0, VisionCredentials(model_id="vl", api_key="k"),
-                max_tokens=4096, extra_params={"reasoning_effort": "none"},
+                0.0,
+                VisionCredentials(model_id="vl", api_key="k"),
+                max_tokens=4096,
+                extra_params={"reasoning_effort": "none"},
             )
         kwargs = init.call_args.kwargs
         self.assertEqual(4096, kwargs["max_tokens"])
@@ -384,6 +417,6 @@ class VisionParameterTests(unittest.TestCase):
 
     def test_the_output_budget_default_fits_a_small_quota(self):
         """input (~3k for a page image) + this must stay inside an 8k/min window."""
-        from backend.agent.profiles.registry import load_profile as _load
+        from backend.profiles.registry import load_profile as _load
 
         self.assertLessEqual(_load("base").assets.figures.vision_max_output_tokens, 5000)

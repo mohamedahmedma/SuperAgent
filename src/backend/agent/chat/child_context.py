@@ -27,6 +27,7 @@ unbind it entirely (`:363`) — the custody-transfer path. Without the stamp, a 
 leaves a conversation pinned to the previous family's child, and the next vague question
 injects that child's name into a prompt. One string comparison closes it.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -65,9 +66,7 @@ class SessionChild(BaseModel):
         return bool(self.student_id)
 
     @classmethod
-    def from_metadata(
-        cls, metadata: Optional[dict], *, guardian_id: str = ""
-    ) -> "SessionChild":
+    def from_metadata(cls, metadata: Optional[dict], *, guardian_id: str = "") -> "SessionChild":
         """Read the pin off session metadata, tolerantly.
 
         Absent, unreadable, or belonging to a different guardian all produce an empty
@@ -153,9 +152,7 @@ class SessionChild(BaseModel):
         self.gender = "unknown"
 
 
-def load_child_state(
-    metadata: Optional[dict], *, guardian_id: str = ""
-) -> SessionChild:
+def load_child_state(metadata: Optional[dict], *, guardian_id: str = "") -> SessionChild:
     return SessionChild.from_metadata(metadata, guardian_id=guardian_id)
 
 

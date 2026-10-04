@@ -21,6 +21,7 @@ Three properties, one class each:
 And one the rest rely on: IT ALSO TRAVELS AS DATA, so a client can draw the record rather
 than print it — see the second half of this file.
 """
+
 import unittest
 
 from tests.general import test_parent_turn_scenarios as scenarios
@@ -86,7 +87,7 @@ class TheRecordIsRenderedNotRetyped(unittest.TestCase):
         from backend.agent.chat.answer_blocks import _EVIDENCE_MARKERS
 
         rendered = io.open(
-            "src/backend/agent/prompts/templates/tools/records_result.j2", encoding="utf-8"
+            "src/backend/prompts/templates/tools/records_result.j2", encoding="utf-8"
         ).read()
         headers = set(re.findall(r"^([A-Z][A-Z_]{3,})(?: for|:)", rendered, re.MULTILINE))
         self.assertTrue(headers, "no headers found — did the template change shape?")
@@ -106,15 +107,8 @@ class TheBlockIsNarrowedToWhatWasAsked(unittest.TestCase):
     reads is still the tool's own.
     """
 
-    GRADES = (
-        "اللغة العربية: 84.0% (B)\n"
-        "اللغة الإنجليزية: 78.0% (C)\n"
-        "الأحياء: 89.0% (B)"
-    )
-    WEEK = (
-        "**الأحد**\n1) اللغة العربية · 07:45–08:30\n"
-        "**الاثنين**\n1) الأحياء · 07:45–08:30"
-    )
+    GRADES = "اللغة العربية: 84.0% (B)\nاللغة الإنجليزية: 78.0% (C)\nالأحياء: 89.0% (B)"
+    WEEK = "**الأحد**\n1) اللغة العربية · 07:45–08:30\n**الاثنين**\n1) الأحياء · 07:45–08:30"
 
     class _Ctx:
         def __init__(self, blocks):
@@ -131,7 +125,7 @@ class TheBlockIsNarrowedToWhatWasAsked(unittest.TestCase):
         self.assertEqual("اللغة العربية: 84.0% (B)", shown)
 
     def test_naming_no_subject_keeps_the_whole_record(self):
-        """"Show me her grades" must still show all of them."""
+        """ "Show me her grades" must still show all of them."""
         self.assertEqual(self.GRADES, self._shown("دي درجاتها:", "grades", self.GRADES))
 
     def test_one_named_day_keeps_only_that_day(self):
@@ -181,16 +175,14 @@ class TheBlockStaysOutOfTheModelsHistory(unittest.TestCase):
     def test_the_resolver_sees_the_subject_not_the_rows(self):
         from langchain_core.messages import AIMessage, HumanMessage
 
-        from backend.agent.chat.resolution import conversation_text
         from backend.agent.chat.answer_blocks import _append_answer_blocks
+        from backend.agent.chat.resolution import conversation_text
 
         stored = _append_answer_blocks(
             "حضرتك، جدول فاطمة للفصل الدراسي الثاني:",
             self._Ctx(["**الأحد**\n1) الكيمياء · 07:45–08:30\n2) عربي · 08:30–09:15"]),
         )
-        seen = conversation_text(
-            [HumanMessage(content="جدول بنتي"), AIMessage(content=stored)]
-        )
+        seen = conversation_text([HumanMessage(content="جدول بنتي"), AIMessage(content=stored)])
         self.assertIn("جدول فاطمة للفصل الدراسي الثاني", seen)
         self.assertNotIn("07:45", seen)
         self.assertNotIn("الكيمياء", seen)
@@ -212,23 +204,28 @@ WEEK_DATA = {
     "term_label": "الفصل الأول",
     "periods": [
         {"number": 1, "starts_at": "07:45", "ends_at": "08:30"},
-        {"number": 2, "label": "فسحة", "starts_at": "08:30", "ends_at": "08:50",
-         "is_teaching": False},
+        {
+            "number": 2,
+            "label": "فسحة",
+            "starts_at": "08:30",
+            "ends_at": "08:50",
+            "is_teaching": False,
+        },
         {"number": 3, "starts_at": "08:50", "ends_at": "09:35"},
     ],
     "days": [
-        {"day": "sunday", "label": "الأحد", "slots": [
-            {"period": 1, "subject": "اللغة العربية"},
-            {"period": 3, "subject": "", "is_free": True},
-        ]},
+        {
+            "day": "sunday",
+            "label": "الأحد",
+            "slots": [
+                {"period": 1, "subject": "اللغة العربية"},
+                {"period": 3, "subject": "", "is_free": True},
+            ],
+        },
         {"day": "monday", "label": "الاثنين", "slots": [{"period": 1, "subject": "الأحياء"}]},
     ],
 }
-GRADES_TEXT = (
-    "اللغة العربية: 84.0% (B)\n"
-    "اللغة الإنجليزية: 78.0% (C)\n"
-    "الأحياء: — · لسه جاري"
-)
+GRADES_TEXT = "اللغة العربية: 84.0% (B)\nاللغة الإنجليزية: 78.0% (C)\nالأحياء: — · لسه جاري"
 GRADES_DATA = {
     "term_label": "الفصل الأول",
     "courses": [
@@ -264,8 +261,9 @@ class TheRecordAlsoTravelsAsData(unittest.TestCase):
             "دي جدولها:", [{"kind": "timetable", "text": WEEK_TEXT, "data": WEEK_DATA}]
         )
         self.assertEqual(f"دي جدولها:\n\n{BLOCK_MARKER}\n{WEEK_TEXT}", text)
-        self.assertEqual([("timetable", 0, "ar")],
-                         [(b["kind"], b["index"], b["language"]) for b in blocks])
+        self.assertEqual(
+            [("timetable", 0, "ar")], [(b["kind"], b["index"], b["language"]) for b in blocks]
+        )
         self.assertEqual(["sunday", "monday"], [d["day"] for d in blocks[0]["data"]["days"]])
 
     def test_a_break_keeps_its_place_in_the_day(self):
@@ -281,10 +279,13 @@ class TheRecordAlsoTravelsAsData(unittest.TestCase):
         """Positional matching would draw the week in the grades' place."""
         from backend.agent.chat.answer_blocks import BLOCK_MARKER
 
-        text, blocks = _settle("درجاتها وجدولها:", [
-            {"kind": "grades", "text": GRADES_TEXT, "data": None},
-            {"kind": "timetable", "text": WEEK_TEXT, "data": WEEK_DATA},
-        ])
+        text, blocks = _settle(
+            "درجاتها وجدولها:",
+            [
+                {"kind": "grades", "text": GRADES_TEXT, "data": None},
+                {"kind": "timetable", "text": WEEK_TEXT, "data": WEEK_DATA},
+            ],
+        )
         self.assertEqual(2, text.count(BLOCK_MARKER))
         self.assertEqual([("timetable", 1)], [(b["kind"], b["index"]) for b in blocks])
 
@@ -304,7 +305,8 @@ class TheRecordAlsoTravelsAsData(unittest.TestCase):
 
     def test_no_language_is_invented_for_a_turn_that_set_none(self):
         _, blocks = _settle(
-            "دي جدولها:", [{"kind": "timetable", "text": WEEK_TEXT, "data": WEEK_DATA}],
+            "دي جدولها:",
+            [{"kind": "timetable", "text": WEEK_TEXT, "data": WEEK_DATA}],
             language="",
         )
         self.assertEqual("", blocks[0]["language"])
@@ -372,8 +374,9 @@ class TheBlocksSurviveTheTrace(unittest.TestCase):
         from backend.agent.schemas.chat import normalize_rag_trace
 
         block = {"kind": "grades", "index": 0, "data": GRADES_DATA}
-        biology = normalize_rag_trace({"answer_blocks": [block]})["answer_blocks"][0][
-            "data"]["courses"][2]
+        biology = normalize_rag_trace({"answer_blocks": [block]})["answer_blocks"][0]["data"][
+            "courses"
+        ][2]
         self.assertIsNone(biology.get("percentage"))
         self.assertTrue(biology["in_progress"])
 
@@ -381,8 +384,11 @@ class TheBlocksSurviveTheTrace(unittest.TestCase):
         """A validation error quotes its input, and the input is a child's marks."""
         from backend.agent.schemas.chat import normalize_answer_blocks
 
-        bad = {"kind": "grades", "index": 0,
-               "data": {"courses": [{"subject": "اللغة العربية", "percentage": "ممتاز"}]}}
+        bad = {
+            "kind": "grades",
+            "index": 0,
+            "data": {"courses": [{"subject": "اللغة العربية", "percentage": "ممتاز"}]},
+        }
         with self.assertLogs("backend.agent.schemas.chat", level="WARNING") as logs:
             self.assertEqual([], normalize_answer_blocks([bad]))
         logged = "\n".join(logs.output)
@@ -392,8 +398,9 @@ class TheBlocksSurviveTheTrace(unittest.TestCase):
     def test_a_turn_with_no_trace_gets_one_rather_than_losing_its_blocks(self):
         from backend.agent.chat.answer_blocks import attach_answer_blocks
 
-        self.assertEqual({"answer_blocks": [TIMETABLE_BLOCK]},
-                         attach_answer_blocks(None, [TIMETABLE_BLOCK]))
+        self.assertEqual(
+            {"answer_blocks": [TIMETABLE_BLOCK]}, attach_answer_blocks(None, [TIMETABLE_BLOCK])
+        )
         self.assertIsNone(attach_answer_blocks(None, []))
 
     def test_storage_keeps_the_blocks_while_it_trims_the_assets(self):
@@ -419,8 +426,7 @@ class TheStreamSendsTheDataAheadOfItsText(scenarios.ParentTurnScenario):
             ctx.note_answer_block(WEEK_TEXT, kind="timetable", data=WEEK_DATA)
 
         return await self.run_turn(
-            [("m1", [], scenarios._tool_chunk()),
-             ("m2", scenarios._split("دي جدول ليلى:"), None)],
+            [("m1", [], scenarios._tool_chunk()), ("m2", scenarios._split("دي جدول ليلى:"), None)],
             question="جدول بنتي",
             on_run=the_timetable_tool_ran,
             storage=storage,

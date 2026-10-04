@@ -24,18 +24,24 @@ The existing suite covers the happy path. Everything below is a way the parent's
 or the world around it, can go wrong — plus the guarantee that the two older HITL routes
 did not change when this branch was added in front of them.
 """
-from datetime import datetime, timezone
+
 import os
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 from backend.agent.chat import service
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.child_resolution import resolve_child
 from backend.agent.chat.child_roster import ChildOption
+from backend.agent.chat.clarification import (
+    _current_pending_hitl,
+    child_choice_pending,
+    enter_turn,
+    pin_the_child_the_parent_named,
+)
 from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.resolution import CORRECTION, STANDALONE, ResolvedQuestion
-from backend.agent.chat.clarification import _current_pending_hitl, child_choice_pending, enter_turn, pin_the_child_the_parent_named
 from backend.agent.chat.signals import RequestSignals
 from backend.agent.chat.turn_policy import resolve_turn
 from backend.agent.schemas.chat import PendingHitlState
@@ -49,15 +55,16 @@ _ASKED_JUST_NOW = datetime.now(timezone.utc).isoformat()
 # necessarily the way they will type it.
 ALI = ChildOption(student_id="S-1", label="علي احمد", gender="male", year_level="Year 4")
 AHMED = ChildOption(student_id="S-2", label="أحمد احمد", gender="male")
-SARA = ChildOption(
-    student_id="S-3", label="سارة أحمد", gender="female", label_en="Sara Ahmed"
-)
+SARA = ChildOption(student_id="S-3", label="سارة أحمد", gender="female", label_en="Sara Ahmed")
 
 ROSTER_ROWS = [
-    {"student_id": "S-1", "full_name_ar": "علي احمد", "gender": "male",
-     "year_level": "Year 4"},
-    {"student_id": "S-3", "full_name_ar": "سارة أحمد", "full_name_en": "Sara Ahmed",
-     "gender": "female"},
+    {"student_id": "S-1", "full_name_ar": "علي احمد", "gender": "male", "year_level": "Year 4"},
+    {
+        "student_id": "S-3",
+        "full_name_ar": "سارة أحمد",
+        "full_name_en": "Sara Ahmed",
+        "gender": "female",
+    },
 ]
 # Two rows sharing a first name — the reason `_named` only trusts a UNIQUE match.
 SAME_NAME_ROWS = [
@@ -121,9 +128,7 @@ def _ctx(guardian_id="G-1", token="signed.identity.token"):
     return ChatRequestContext(
         user_id="user-1",
         session_id="session-1",
-        caller=CallerIdentity(
-            user_id="user-1", guardian_id=guardian_id, guardian_token=token
-        ),
+        caller=CallerIdentity(user_id="user-1", guardian_id=guardian_id, guardian_token=token),
     )
 
 
@@ -204,9 +209,7 @@ class ThePendingQuestionSurvivesStorage(unittest.TestCase):
             "an unknown route": {**_pending(), "route": "child_selection"},
             "an unknown status": {**_pending(), "retrieval_status": "needs_child"},
             "an empty original question": {**_pending(), "original_question": ""},
-            "a resume state of the wrong shape": {
-                **_pending(), "resume_state": {"question": ""}
-            },
+            "a resume state of the wrong shape": {**_pending(), "resume_state": {"question": ""}},
             "a missing id": {k: v for k, v in _pending().items() if k != "id"},
             "not a dict at all": ["a", "b"],
         }
@@ -229,12 +232,11 @@ class ThePlannerOnlyAsksWhenThereIsSomethingToAsk(unittest.TestCase):
         """Options with no copy to ask them with is not a question anybody was asked, so
         storing a pending state would leave the session waiting for a reply to a message
         that was never sent."""
+
         class _NoCopy(_Copy):
             which_child = None
 
-        signals = RequestSignals(
-            question=QUESTION, about_child=True, child_question_kind="records"
-        )
+        signals = RequestSignals(question=QUESTION, about_child=True, child_question_kind="records")
         plan = resolve_turn(
             signals,
             agent_config=_Agent(),
@@ -255,6 +257,7 @@ class ThePlannerOnlyAsksWhenThereIsSomethingToAsk(unittest.TestCase):
         """An integrating deployment's own plan object, or an older one. Reading the
         field defensively is what keeps this from raising on a turn it has no business
         touching."""
+
         class _Foreign:
             static_reply = "..."
 
@@ -302,7 +305,7 @@ class TheReplyReopensTheOriginalQuestion(unittest.TestCase):
         resolver.assert_not_called()
 
     def test_a_reply_matching_nobody_still_reopens_the_original_question(self):
-        """"the older one" is not a name, and this stage cannot know that — the roster is
+        """ "the older one" is not a name, and this stage cannot know that — the roster is
         read later. What matters is that the turn is still about the question the parent
         asked, so the next plan can ask again rather than answer about a phrase."""
         entry = enter_turn("الكبير", [], {"pending_hitl": _pending()})
@@ -362,7 +365,9 @@ class TheOlderHitlRoutesAreUnaffected(unittest.TestCase):
                 )
                 resolver = Mock(return_value=resolved)
                 entry = enter_turn(
-                    "Year 4", [], {"pending_hitl": self._pending_clarify(route)},
+                    "Year 4",
+                    [],
+                    {"pending_hitl": self._pending_clarify(route)},
                     resolve=resolver,
                 )
 
@@ -379,7 +384,9 @@ class TheOlderHitlRoutesAreUnaffected(unittest.TestCase):
             question="ما هي مواعيد الحافلة؟", intent=CORRECTION, resolved=True
         )
         entry = enter_turn(
-            "no, I meant the bus", [], {"pending_hitl": self._pending_clarify()},
+            "no, I meant the bus",
+            [],
+            {"pending_hitl": self._pending_clarify()},
             resolve=Mock(return_value=resolved),
         )
 
@@ -426,15 +433,13 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         self.assertEqual(ctx.child.label, "سارة أحمد")
 
     def test_a_reply_matching_nobody_pins_nothing(self):
-        """"the older one" is a perfectly reasonable thing for a parent to type, and it is
+        """ "the older one" is a perfectly reasonable thing for a parent to type, and it is
         not an answer this code can act on. Guessing here would answer about a child
         nobody chose."""
         for reply in ("الكبير", "asdf", "the older one", "1"):
             with self.subTest(reply=reply):
                 ctx = _ctx()
-                with patch(
-                    "backend.records_http.get", _serves(ROSTER_ROWS)
-                ):
+                with patch("backend.records_http.get", _serves(ROSTER_ROWS)):
                     pinned = pin_the_child_the_parent_named(ctx, reply)
 
                 self.assertFalse(pinned)
@@ -460,9 +465,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
 
     def test_an_empty_reply_pins_nothing_and_does_not_read_the_roster(self):
         ctx = _ctx()
-        with patch(
-            "backend.records_http.get", side_effect=_refuses(500)
-        ) as spy:
+        with patch("backend.records_http.get", side_effect=_refuses(500)) as spy:
             self.assertFalse(pin_the_child_the_parent_named(ctx, ""))
 
         spy.assert_not_called()
@@ -500,9 +503,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
     def test_a_session_with_no_guardian_pins_nothing(self):
         """Staff, a background job, a test. Nobody to ask a roster about."""
         ctx = ChatRequestContext(user_id="staff-1", session_id="s")
-        with patch(
-            "backend.records_http.get", side_effect=_serves(ROSTER_ROWS)
-        ) as spy:
+        with patch("backend.records_http.get", side_effect=_serves(ROSTER_ROWS)) as spy:
             self.assertFalse(pin_the_child_the_parent_named(ctx, "سارة"))
 
         spy.assert_not_called()

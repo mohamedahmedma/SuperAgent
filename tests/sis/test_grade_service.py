@@ -13,6 +13,7 @@ Everything below is a fake with only the methods this service calls. Implementin
 whole Protocol would be a second repository to maintain, and the Protocols are structural
 precisely so a test does not have to.
 """
+
 from collections.abc import Collection, Mapping, Sequence
 from datetime import UTC, date, datetime
 
@@ -84,9 +85,7 @@ class FakeStudents:
         self._by_number = {str(s.student_number): s for s in students}
 
     def get_many(self, numbers: Collection[StudentNumber]) -> Mapping[str, Student]:
-        return {
-            str(n): self._by_number[str(n)] for n in numbers if str(n) in self._by_number
-        }
+        return {str(n): self._by_number[str(n)] for n in numbers if str(n) in self._by_number}
 
 
 class FakeSubjects:
@@ -99,9 +98,7 @@ class FakeSubjects:
     """
 
     def __init__(self, *subjects: Subject) -> None:
-        self._rows = {
-            (str(s.academic_year_code), str(s.code)): s for s in subjects
-        }
+        self._rows = {(str(s.academic_year_code), str(s.code)): s for s in subjects}
 
     def get_many(
         self, codes: Collection[SubjectCode], academic_year_code: object
@@ -128,20 +125,14 @@ class FakeEnrolments:
     def class_sections_on(
         self, student_ids: Collection[StudentNumber], on_date: date
     ) -> Mapping[str, ClassSection]:
-        return {
-            str(s): self._placements[str(s)]
-            for s in student_ids
-            if str(s) in self._placements
-        }
+        return {str(s): self._placements[str(s)] for s in student_ids if str(s) in self._placements}
 
 
 class FakeClassSections:
     def __init__(self, ids: Mapping[ClassSectionKey, int]) -> None:
         self._ids = dict(ids)
 
-    def ids_for(
-        self, keys: Collection[ClassSectionKey]
-    ) -> Mapping[ClassSectionKey, int]:
+    def ids_for(self, keys: Collection[ClassSectionKey]) -> Mapping[ClassSectionKey, int]:
         return {k: self._ids[k] for k in keys if k in self._ids}
 
 
@@ -428,7 +419,10 @@ def test_blank_and_zero_in_one_file_stay_apart(uow: FakeUnitOfWork) -> None:
     """The two cases in one upload, which is how a real sheet carries them."""
     service = _service(
         uow,
-        [_row(2, student="0071", percentage=None), _row(3, student="0072", percentage=Percentage(0))],
+        [
+            _row(2, student="0071", percentage=None),
+            _row(3, student="0072", percentage=Percentage(0)),
+        ],
     )
 
     preview = service.preview(_preview_command())
@@ -459,9 +453,7 @@ def test_blank_cell_does_not_erase_a_mark_already_on_file(uow: FakeUnitOfWork) -
     service = _service(uow, [_row(2, percentage=None)])
 
     preview = service.preview(_preview_command())
-    result = service.commit(
-        GradeCommitCommand(batch_id=preview.batch_id, actor="registrar")
-    )
+    result = service.commit(GradeCommitCommand(batch_id=preview.batch_id, actor="registrar"))
 
     assert _codes(result) == [RowCode.OK]
     assert _stored(uow).percentage == Percentage(74)
@@ -470,7 +462,7 @@ def test_blank_cell_does_not_erase_a_mark_already_on_file(uow: FakeUnitOfWork) -
 def test_points_and_max_points_are_accepted_instead_of_a_percentage(
     uow: FakeUnitOfWork,
 ) -> None:
-    """"17 out of 20" is a stated figure; the raw pair is kept beside the restatement."""
+    """ "17 out of 20" is a stated figure; the raw pair is kept beside the restatement."""
     service = _service(uow, [_row(2, points=17.0, max_points=20.0)])
 
     preview = service.preview(_preview_command())
@@ -529,9 +521,7 @@ def test_unknown_student_subject_and_term_each_get_their_own_code(
         "subject_code",
     ]
 
-    result = service.commit(
-        GradeCommitCommand(batch_id=preview.batch_id, actor="registrar")
-    )
+    result = service.commit(GradeCommitCommand(batch_id=preview.batch_id, actor="registrar"))
 
     assert result.rejected_count == 3
     assert list(uow.grades.stored) == [("0071", "MATH", TERM)]

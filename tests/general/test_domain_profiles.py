@@ -4,6 +4,7 @@ The most important tests here are the drift guards: `base` must keep reproducing
 behaviour the system had when these values were hardcoded, because `school` — the
 profile the deployment loads by default — inherits everything it does not override.
 """
+
 import os
 import unittest
 from contextlib import contextmanager
@@ -11,8 +12,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-import backend.agent.profiles.registry as registry
-from backend.agent.profiles.registry import (
+import backend.profiles.registry as registry
+from backend.profiles.registry import (
     DEFAULT_PROFILE,
     ProfileError,
     available_profiles,
@@ -20,7 +21,7 @@ from backend.agent.profiles.registry import (
     reload_profile,
     set_profile,
 )
-from backend.agent.profiles.schema import DomainProfile
+from backend.profiles.schema import DomainProfile
 
 
 class ProfileTestCase(unittest.TestCase):
@@ -187,8 +188,9 @@ class DeepMergeTests(ProfileTestCase):
 
     def test_nested_section_override_preserves_sibling_keys(self):
         child = "extends: base\nname: child\nassets:\n  triage:\n    min_width: 256\n"
-        with self._definitions(base=Path(registry.DEFINITIONS_DIR / "base.yaml").read_text("utf-8"),
-                               child=child):
+        with self._definitions(
+            base=Path(registry.DEFINITIONS_DIR / "base.yaml").read_text("utf-8"), child=child
+        ):
             profile = load_profile("child")
         self.assertEqual(256, profile.assets.triage.min_width)
         # Untouched siblings survive at both nesting levels.
@@ -203,7 +205,9 @@ class DeepMergeTests(ProfileTestCase):
             "leaf": "extends: mid\nname: leaf\nretrieval:\n  top_k: 3\n",
         }
         with self._definitions(**files):
-            with patch.dict(os.environ, {"RETRIEVAL_TOP_K": "", "RETRIEVAL_CANDIDATE_MULTIPLIER": ""}):
+            with patch.dict(
+                os.environ, {"RETRIEVAL_TOP_K": "", "RETRIEVAL_CANDIDATE_MULTIPLIER": ""}
+            ):
                 profile = load_profile("leaf")
         self.assertEqual(3, profile.retrieval.top_k)
         self.assertEqual(9, profile.retrieval.candidate_multiplier)
@@ -330,7 +334,9 @@ class NoDriftTests(ProfileTestCase):
         cleared = {
             key: ""
             for key in registry.ENV_OVERRIDES
-            if key.startswith(("RETRIEVAL_", "CHUNK_", "AUTO_MERGE_", "LEAF_", "RERANK_", "SEMANTIC_"))
+            if key.startswith(
+                ("RETRIEVAL_", "CHUNK_", "AUTO_MERGE_", "LEAF_", "RERANK_", "SEMANTIC_")
+            )
         }
         with patch.dict(os.environ, cleared):
             profile = load_profile("base")
@@ -354,11 +360,11 @@ class NoDriftTests(ProfileTestCase):
         self.assertEqual(0.3, models.answer_temperature)
 
     def test_prompt_placeholders_are_preserved(self):
-        """The prompts moved to backend/agent/prompts/templates/, so the placeholders that
+        """The prompts moved to backend/prompts/templates/, so the placeholders that
         must survive are the templates' — a template that stopped substituting its
         payload would render a grader prompt with no snippets in it and still look
         perfectly well-formed."""
-        from backend.agent.prompts import render
+        from backend.prompts import render
 
         marker = "PLACEHOLDER_MARKER"
         graded = render("rag/evidence_grade.j2", question=marker, context=marker, constraints=[])
@@ -366,7 +372,9 @@ class NoDriftTests(ProfileTestCase):
         # Carried conditions are a third payload, and they must reach the grader as
         # their own section rather than folded into the question — see AssessmentContext.
         with_conditions = render(
-            "rag/evidence_grade.j2", question=marker, context=marker,
+            "rag/evidence_grade.j2",
+            question=marker,
+            context=marker,
             constraints=["CONDITION_MARKER"],
         )
         self.assertIn("CONDITION_MARKER", with_conditions)

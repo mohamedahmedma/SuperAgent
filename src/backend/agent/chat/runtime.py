@@ -9,17 +9,16 @@ from langchain.agents.middleware import (
     after_model,
     before_model,
 )
-from langchain_core.messages import AIMessage
-from typing_extensions import NotRequired
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
+from typing_extensions import NotRequired
 
 from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.tools import KNOWLEDGE_TOOL, build_tools
 from backend.composition import default_services
 from backend.llm import sampling
+from backend.profiles import get_profile
 from backend.provider_compat import fold_tool_results_into_text
-from backend.agent.profiles import get_profile
-from backend.agent.tools import KNOWLEDGE_TOOL, build_tools
 
 API_KEY = os.getenv("ARK_API_KEY")
 MODEL = os.getenv("MODEL")
@@ -41,15 +40,17 @@ _UNHONOURED_TOOL_CHOICE_PARTS = (
 #
 # Both of a turn's streamed calls — the tool decision and the answer — go through it, so it
 # is the model whose connections matter most to reuse (backend/llm_http.py, item 48).
-model = fold_tool_results_into_text(init_chat_model(
-    model=MODEL,
-    model_provider="openai",
-    api_key=API_KEY,
-    base_url=BASE_URL,
-    stream_usage=True,
-    **default_services().provider_http.model_kwargs(),
-    **sampling("answer"),
-))
+model = fold_tool_results_into_text(
+    init_chat_model(
+        model=MODEL,
+        model_provider="openai",
+        api_key=API_KEY,
+        base_url=BASE_URL,
+        stream_usage=True,
+        **default_services().provider_http.model_kwargs(),
+        **sampling("answer"),
+    )
+)
 
 
 # Tool results whose outcome is already the final answer. The model adds nothing to
@@ -210,13 +211,15 @@ class _ToolBudget(AgentMiddleware[ToolBudgetState, Any, Any]):
         if not made or not request.tools:
             return request
         affordable = [
-            tool for tool in request.tools
+            tool
+            for tool in request.tools
             if made.get(_tool_name(tool), 0) < budget_for(_tool_name(tool))
         ]
         if len(affordable) == len(request.tools):
             return request
-        withheld = sorted({_tool_name(t) for t in request.tools}
-                          - {_tool_name(t) for t in affordable})
+        withheld = sorted(
+            {_tool_name(t) for t in request.tools} - {_tool_name(t) for t in affordable}
+        )
         logger.info("tool budget spent, not offering: %s", ", ".join(withheld))
         overrides = {"tools": affordable}
         if not affordable:
@@ -406,10 +409,7 @@ def planned_tool_calls(planned, already_made: dict) -> list:
         {"name": str((call or {}).get("name") or ""), "args": (call or {}).get("args")}
         for call in (planned or [])
     ]
-    well_formed = [
-        call for call in well_formed
-        if call["name"] and isinstance(call["args"], dict)
-    ]
+    well_formed = [call for call in well_formed if call["name"] and isinstance(call["args"], dict)]
 
     calls = []
     made = dict(already_made or {})

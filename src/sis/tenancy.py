@@ -28,6 +28,7 @@ a school code and illegal in an environment variable name. Two codes that fold t
 same suffix are refused at startup rather than silently sharing a database — see
 `env_suffix`.
 """
+
 from __future__ import annotations
 
 import os
@@ -58,9 +59,7 @@ class UnknownSchool(UnknownReference):
     """
 
     def __init__(self, code: str) -> None:
-        super().__init__(
-            f"no school {code!r} is configured on this service", field="school_code"
-        )
+        super().__init__(f"no school {code!r} is configured on this service", field="school_code")
         #: Named `school_code`, not `code`. `SisError.code` is the *error* code that
         #: `sis.api.errors` puts on the wire and clients branch on; assigning the school
         #: to it replaced `unknown_reference` with whatever string the caller sent, so
@@ -168,8 +167,7 @@ def _configured_codes() -> tuple[str, ...]:
             code = str(SchoolCode(candidate))
         except ValidationError as error:
             raise TenancyMisconfigured(
-                f"{SCHOOLS_VAR} lists {candidate!r}, which is not a valid school code: "
-                f"{error}"
+                f"{SCHOOLS_VAR} lists {candidate!r}, which is not a valid school code: {error}"
             ) from error
         if code not in seen:
             seen.append(code)

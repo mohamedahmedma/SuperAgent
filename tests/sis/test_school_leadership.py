@@ -1,4 +1,5 @@
 """Stage 11 boundaries for School Owner and School Manager / Principal."""
+
 from datetime import date
 
 from fastapi.testclient import TestClient
@@ -9,7 +10,14 @@ from sis.domain.rbac import RoleCode, ScopeType
 from sis.infrastructure.crypto import hash_password
 from sis.infrastructure.db import models as m
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
-from tests.sis.test_rbac_api import PASSWORD, _grant, _make_user, _sign_in, ids, principal  # noqa: F401
+from tests.sis.test_rbac_api import (  # noqa: F401
+    PASSWORD,
+    _grant,
+    _make_user,
+    _sign_in,
+    ids,
+    principal,
+)
 from tests.sis.test_timetable_api import SCHOOL, registrar, school  # noqa: F401
 
 
@@ -19,7 +27,9 @@ def _role_headers(client: TestClient, role: RoleCode, school_id: int | None) -> 
         sync_roles(uow._session)
         user_id = _make_user(uow._session, username, school_id=school_id)
         _grant(
-            uow._session, user_id, role,
+            uow._session,
+            user_id,
+            role,
             ScopeType.GLOBAL if role is RoleCode.SYSTEM_ADMIN else ScopeType.SCHOOL,
             None if role is RoleCode.SYSTEM_ADMIN else school_id,
         )
@@ -58,7 +68,10 @@ def test_principal_can_correct_student_and_guardian_records_but_never_becomes_sy
     assert "grades.write" in profile["permissions"]
     assert "imports.run" in profile["permissions"]
     forbidden = {
-        "schools.write", "structure.write", "system.manage", "system.status.write",
+        "schools.write",
+        "structure.write",
+        "system.manage",
+        "system.status.write",
     }
     assert forbidden.isdisjoint(profile["permissions"])
 
@@ -68,15 +81,22 @@ def test_principal_can_view_teacher_attendance_but_not_record_it(
 ) -> None:
     with SqlAlchemyUnitOfWork() as uow:
         teacher = m.Teacher(
-            staff_number="T-STAGE11", school_id=ids["school"],
-            full_name_en="Stage Eleven Teacher", full_name_ar="Teacher",
+            staff_number="T-STAGE11",
+            school_id=ids["school"],
+            full_name_en="Stage Eleven Teacher",
+            full_name_ar="Teacher",
         )
         uow._session.add(teacher)
         uow._session.flush()
-        uow._session.add(m.TeacherAttendance(
-            teacher_id=teacher.id, school_id=ids["school"], on_date=date(2026, 8, 31),
-            state="present", recorded_by="system",
-        ))
+        uow._session.add(
+            m.TeacherAttendance(
+                teacher_id=teacher.id,
+                school_id=ids["school"],
+                on_date=date(2026, 8, 31),
+                state="present",
+                recorded_by="system",
+            )
+        )
         uow.commit()
 
     rows = client.get(f"/v1/schools/{SCHOOL}/teachers/attendance", headers=principal)
@@ -84,7 +104,8 @@ def test_principal_can_view_teacher_attendance_but_not_record_it(
     assert rows.json()[0]["staff_number"] == "T-STAGE11"
     refused = client.put(
         f"/v1/schools/{SCHOOL}/teachers/T-STAGE11/attendance/2026-09-01",
-        headers=principal, json={"state": "absent"},
+        headers=principal,
+        json={"state": "absent"},
     )
     assert refused.status_code == 403
 
@@ -99,7 +120,8 @@ def test_principal_adds_supervisor_roles_without_replacing_teacher(
 
     for code in ("grade_supervisor", "attendance_supervisor"):
         response = client.post(
-            f"/v1/rbac/users/{user_id}/roles", headers=principal,
+            f"/v1/rbac/users/{user_id}/roles",
+            headers=principal,
             json={"role_code": code, "scope_type": "school", "scope_id": ids["school"]},
         )
         assert response.status_code == 200, response.text
@@ -115,7 +137,8 @@ def test_principal_cannot_delegate_owner_principal_or_system_admin(
         uow.commit()
     for code in ("school_owner", "principal", "system_admin"):
         response = client.post(
-            f"/v1/rbac/users/{user_id}/roles", headers=principal,
+            f"/v1/rbac/users/{user_id}/roles",
+            headers=principal,
             json={"role_code": code, "scope_type": "school", "scope_id": ids["school"]},
         )
         assert response.status_code == 403, (code, response.text)

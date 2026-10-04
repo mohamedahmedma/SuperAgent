@@ -1,14 +1,14 @@
-from datetime import datetime, timezone
 import importlib
 import json
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from backend.agent.chat.background import InlineJobs
-from backend.composition import Services
 from backend.agent.chat.clarification import PENDING_HITL_KEY
+from backend.composition import Services
 
 # A clarification asked a moment ago. Pending questions expire after a day
 # (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
@@ -81,7 +81,7 @@ def _parse_sse_events(chunks):
         payload = chunk.strip()
         if not payload.startswith("data: "):
             continue
-        data = payload[len("data: "):]
+        data = payload[len("data: ") :]
         if data == "[DONE]":
             events.append({"type": "DONE"})
         else:
@@ -106,11 +106,13 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
     """
 
     def setUp(self):
-        from backend.agent.chat.turn_policy import TurnPlan
         from backend.agent.chat.signals import RequestSignals
+        from backend.agent.chat.turn_policy import TurnPlan
 
         self._planner = patch.object(
-            service, "plan_turn", lambda *a, **k: (TurnPlan(), RequestSignals()),
+            service,
+            "plan_turn",
+            lambda *a, **k: (TurnPlan(), RequestSignals()),
         )
         self._planner.start()
         self.addCleanup(self._planner.stop)
@@ -126,7 +128,10 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             patch.object(service, "generate_session_title", Mock(return_value="short question")),
         ):
             chunks = await _collect_stream(
-                "Hello", "u", "s", services=Services(conversations=fake_storage, background_jobs=InlineJobs())
+                "Hello",
+                "u",
+                "s",
+                services=Services(conversations=fake_storage, background_jobs=InlineJobs()),
             )
 
         events = _parse_sse_events(chunks)
@@ -175,7 +180,9 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(service, "create_agent_for_request", make_agent),
-            patch.object(service, "generate_session_title", Mock(return_value="character question")),
+            patch.object(
+                service, "generate_session_title", Mock(return_value="character question")
+            ),
         ):
             chunks = await _collect_stream(
                 "What is this character's element?",
@@ -229,13 +236,23 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             metadata={PENDING_HITL_KEY: pending_hitl},
         )
         fake_model = FakeDirectModel(["Danjin is the Imaginary element.[1]"])
-        resume_mock = Mock(return_value={
-            "docs": [{"filename": "chars.pdf", "page_number": 1, "text": "Danjin is the Imaginary element."}],
-            "retrieval_status": "answerable",
-            "route": "answer",
-            "rag_trace": {"retrieval_status": "answerable", "route": "answer"},
-        })
-        create_agent_mock = Mock(side_effect=AssertionError("agent should not be created on HITL resume"))
+        resume_mock = Mock(
+            return_value={
+                "docs": [
+                    {
+                        "filename": "chars.pdf",
+                        "page_number": 1,
+                        "text": "Danjin is the Imaginary element.",
+                    }
+                ],
+                "retrieval_status": "answerable",
+                "route": "answer",
+                "rag_trace": {"retrieval_status": "answerable", "route": "answer"},
+            }
+        )
+        create_agent_mock = Mock(
+            side_effect=AssertionError("agent should not be created on HITL resume")
+        )
 
         with (
             patch.object(service, "create_agent_for_request", create_agent_mock),
@@ -243,20 +260,27 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             patch.object(service, "model", fake_model),
         ):
             chunks = await _collect_stream(
-                "Danjin", "u", "s", services=Services(conversations=fake_storage, background_jobs=InlineJobs())
+                "Danjin",
+                "u",
+                "s",
+                services=Services(conversations=fake_storage, background_jobs=InlineJobs()),
             )
 
         events = _parse_sse_events(chunks)
-        self.assertEqual(["Danjin is the Imaginary element.[1]"], [
-            event["content"] for event in events if event.get("type") == "content"
-        ])
+        self.assertEqual(
+            ["Danjin is the Imaginary element.[1]"],
+            [event["content"] for event in events if event.get("type") == "content"],
+        )
         self.assertFalse([event for event in events if event.get("type") == "hitl_request"])
         self.assertIsNone(fake_storage.metadata.get(PENDING_HITL_KEY))
         self.assertEqual("Danjin", fake_storage.messages[-2].content)
         self.assertEqual("Danjin is the Imaginary element.[1]", fake_storage.messages[-1].content)
         resume_mock.assert_called_once()
         create_agent_mock.assert_not_called()
-        self.assertIn("Original question:\nWhat is this character's element?", fake_model.messages[-1][-1].content)
+        self.assertIn(
+            "Original question:\nWhat is this character's element?",
+            fake_model.messages[-1][-1].content,
+        )
         self.assertIn("User's answer:\nDanjin", fake_model.messages[-1][-1].content)
 
 

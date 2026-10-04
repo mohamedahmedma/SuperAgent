@@ -9,6 +9,7 @@ Every name here is a `Protocol`. Nothing in this package may import sqlalchemy, 
 pydantic or `sis.config`: these types are what a service depends on, and a fake in a unit
 test satisfies them structurally without importing this module at all.
 """
+
 from sis.application.ports.parsers import (
     GradeFileParser,
     GuardianFileParser,
@@ -16,9 +17,8 @@ from sis.application.ports.parsers import (
 )
 from sis.application.ports.repositories import (
     AcademicYearRepository,
-    SchoolRepository,
-    AttendanceRepository,
     ApiKeyRepository,
+    AttendanceRepository,
     ClassSectionKey,
     ClassSectionRepository,
     EnrolmentKey,
@@ -27,6 +27,7 @@ from sis.application.ports.repositories import (
     GradeRepository,
     GuardianRepository,
     ImportBatchRepository,
+    SchoolRepository,
     StudentGuardianKey,
     StudentGuardianRepository,
     StudentRepository,

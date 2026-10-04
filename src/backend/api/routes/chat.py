@@ -6,15 +6,15 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
-from backend.api.deps import get_services
 from backend.agent.chat import chat_with_agent, chat_with_agent_stream
 from backend.agent.chat.admission import Refusal, TurnLease
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.language import detect_language
+from backend.agent.schemas import ChatRequest, ChatResponse
+from backend.api.deps import get_services
 from backend.composition import Services
 from backend.infra.auth import AuthenticatedUser, get_current_user
-from backend.agent.profiles import get_profile
-from backend.agent.schemas import ChatRequest, ChatResponse
+from backend.profiles import get_profile
 
 router = APIRouter(tags=["chat"])
 
@@ -84,7 +84,6 @@ def _admit(message: str, user: AuthenticatedUser, services: Services) -> TurnLea
             headers={"Retry-After": str(decision.retry_after_seconds)},
         )
     return decision
-
 
 
 # Deliberately `def`, not `async def`. `chat_with_agent` is synchronous from end to

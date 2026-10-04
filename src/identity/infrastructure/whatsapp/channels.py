@@ -19,6 +19,7 @@ The registry itself is still resolved from the environment — that has to happe
 but it happens *here*, once, at startup, and produces a value. `domain/schools.py` holds
 the data and the lookups and reads nothing.
 """
+
 from __future__ import annotations
 
 import logging
@@ -290,9 +291,7 @@ def build_channels(settings: Settings, directory: GuardianDirectory) -> WhatsApp
 def _configure_single_school(channels: WhatsAppChannels, settings: Settings) -> None:
     number = settings.whatsapp_number
     if number:
-        channels.business_number = e164_or_raise(
-            number, setting="IDENTITY_WHATSAPP_NUMBER"
-        )
+        channels.business_number = e164_or_raise(number, setting="IDENTITY_WHATSAPP_NUMBER")
     else:
         logger.warning(
             "IDENTITY_WHATSAPP_NUMBER is not set. Parent sign-in is DISABLED: without "
@@ -314,18 +313,14 @@ def _configure_single_school(channels: WhatsAppChannels, settings: Settings) -> 
     # instead. Off unless asked for, because the body IS the verification code: anywhere
     # a real parent can be verified, this writes their credential into a file that is
     # backed up, shipped to a log aggregator, and read by people who are not them.
-    channels.default_gateway = RecordingWhatsAppGateway(
-        log_bodies=settings.whatsapp_log_codes
-    )
+    channels.default_gateway = RecordingWhatsAppGateway(log_bodies=settings.whatsapp_log_codes)
     logger.warning(
         "WhatsApp is not configured (IDENTITY_WHATSAPP_PHONE_NUMBER_ID and "
         "IDENTITY_WHATSAPP_TOKEN); verification codes are %s. Parent login by WhatsApp "
         "cannot reach a real phone in this state.",
-        "WRITTEN TO THIS LOG (IDENTITY_WHATSAPP_LOG_CODES is on — never do this in "
-        "production)"
+        "WRITTEN TO THIS LOG (IDENTITY_WHATSAPP_LOG_CODES is on — never do this in production)"
         if settings.whatsapp_log_codes
-        else "discarded. Set IDENTITY_WHATSAPP_LOG_CODES=true to read them here while "
-        "developing",
+        else "discarded. Set IDENTITY_WHATSAPP_LOG_CODES=true to read them here while developing",
     )
 
 
@@ -348,9 +343,7 @@ def _configure_per_school(channels: WhatsAppChannels, settings: Settings) -> Non
     # multi-school deployment refuses rather than handing out one school's number to every
     # school's parents.
     channels.business_number = ""
-    channels.default_gateway = RecordingWhatsAppGateway(
-        log_bodies=settings.whatsapp_log_codes
-    )
+    channels.default_gateway = RecordingWhatsAppGateway(log_bodies=settings.whatsapp_log_codes)
 
     live: list[str] = []
     recording: list[str] = []

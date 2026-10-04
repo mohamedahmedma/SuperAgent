@@ -1,4 +1,5 @@
 """The cache behind RAG_FIX_PLAN item 34, on its own: bounded by size and by age."""
+
 import unittest
 
 from backend.infra.auth import KnownUsers

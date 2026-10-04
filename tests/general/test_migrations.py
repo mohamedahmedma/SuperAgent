@@ -5,6 +5,7 @@ empty one, one `create_all()` built, and one an older `create_all()` built befor
 columns existed. Each case runs in a throwaway schema and ends on the question that
 matters — does the result match the models the code queries with?
 """
+
 import subprocess
 import sys
 import unittest
@@ -108,10 +109,12 @@ class AdoptionTests(MigrationTestCase):
     def test_a_create_all_database_is_adopted_and_keeps_its_rows(self):
         self.legacy_database()
         with self.engine.begin() as connection:
-            connection.execute(text(
-                "INSERT INTO users (username, password_hash, role, created_at) "
-                "VALUES ('parent', 'x', 'user', '2026-09-13 09:00:00')"
-            ))
+            connection.execute(
+                text(
+                    "INSERT INTO users (username, password_hash, role, created_at) "
+                    "VALUES ('parent', 'x', 'user', '2026-09-13 09:00:00')"
+                )
+            )
             user_id = connection.execute(text("SELECT id FROM users")).scalar_one()
             connection.execute(
                 text(
@@ -135,15 +138,19 @@ class AdoptionTests(MigrationTestCase):
     def test_an_older_database_gains_exactly_what_it_was_missing(self):
         self.legacy_database()
         with self.engine.begin() as connection:
-            connection.execute(text("ALTER TABLE parent_chunks DROP COLUMN modality, DROP COLUMN asset_ids"))
+            connection.execute(
+                text("ALTER TABLE parent_chunks DROP COLUMN modality, DROP COLUMN asset_ids")
+            )
             connection.execute(text("DROP TABLE corpus_digests"))
             connection.execute(text("DROP INDEX ix_document_pairs_ar"))
             connection.execute(text("ALTER TABLE chat_sessions DROP CONSTRAINT uq_user_session"))
-            connection.execute(text(
-                "INSERT INTO parent_chunks (chunk_id, text, filename, file_type, file_path, page_number, "
-                "parent_chunk_id, root_chunk_id, chunk_level, chunk_idx, updated_at) "
-                "VALUES ('c1', 'fees', 'fees.pdf', 'pdf', '', 0, '', '', 1, 0, '2026-09-13 10:00:00')"
-            ))
+            connection.execute(
+                text(
+                    "INSERT INTO parent_chunks (chunk_id, text, filename, file_type, file_path, page_number, "
+                    "parent_chunk_id, root_chunk_id, chunk_level, chunk_idx, updated_at) "
+                    "VALUES ('c1', 'fees', 'fees.pdf', 'pdf', '', 0, '', '', 1, 0, '2026-09-13 10:00:00')"
+                )
+            )
 
         self.migrate(command.upgrade, "head")
 
@@ -153,7 +160,9 @@ class AdoptionTests(MigrationTestCase):
                 text("SELECT modality, asset_ids FROM parent_chunks")
             ).one()
         self.assertEqual(("text", []), (modality, asset_ids))
-        columns = {column["name"]: column for column in inspect(self.engine).get_columns("parent_chunks")}
+        columns = {
+            column["name"]: column for column in inspect(self.engine).get_columns("parent_chunks")
+        }
         # The backfill default existed only for the rows already there; a fresh database has none.
         self.assertIsNone(columns["modality"]["default"])
         self.assertIsNone(columns["asset_ids"]["default"])
@@ -168,14 +177,18 @@ class TypeConversionTests(MigrationTestCase):
     def test_downgrading_to_the_baseline_restores_the_old_types_without_moving_an_instant(self):
         self.migrate(command.upgrade, "head")
         with self.engine.begin() as connection:
-            connection.execute(text(
-                "INSERT INTO document_pairs (pair_id, title, filename_ar, filename_en, created_at, updated_at) "
-                "VALUES ('p1', 'Fees', '', 'fees_en.docx', '2026-09-13 10:00:00+00', '2026-09-13 10:00:00+00')"
-            ))
+            connection.execute(
+                text(
+                    "INSERT INTO document_pairs (pair_id, title, filename_ar, filename_en, created_at, updated_at) "
+                    "VALUES ('p1', 'Fees', '', 'fees_en.docx', '2026-09-13 10:00:00+00', '2026-09-13 10:00:00+00')"
+                )
+            )
 
         self.migrate(command.downgrade, "0001")
 
-        self.assertEqual("timestamp without time zone", self.column_type("document_pairs", "created_at"))
+        self.assertEqual(
+            "timestamp without time zone", self.column_type("document_pairs", "created_at")
+        )
         self.assertEqual("json", self.column_type("section_summaries", "answers"))
         with self.engine.connect() as connection:
             created = connection.execute(text("SELECT created_at FROM document_pairs")).scalar_one()
@@ -186,14 +199,19 @@ class PersistentNoteRemovalTests(MigrationTestCase):
     def test_the_note_keys_are_stripped_and_every_other_key_is_kept(self):
         self.migrate(command.upgrade, "0004")
         with self.engine.begin() as connection:
-            connection.execute(text(
-                "INSERT INTO users (username, password_hash, role, created_at) "
-                "VALUES ('parent', 'x', 'user', '2026-09-13 09:00:00+00')"
-            ))
+            connection.execute(
+                text(
+                    "INSERT INTO users (username, password_hash, role, created_at) "
+                    "VALUES ('parent', 'x', 'user', '2026-09-13 09:00:00+00')"
+                )
+            )
             user_id = connection.execute(text("SELECT id FROM users")).scalar_one()
             for session_id, meta in (
-                ("noted", '{"title": "Fees", "persistent_note": "asked about fees", '
-                          '"persistent_note_guardian": "G-1", "pending_hitl": null}'),
+                (
+                    "noted",
+                    '{"title": "Fees", "persistent_note": "asked about fees", '
+                    '"persistent_note_guardian": "G-1", "pending_hitl": null}',
+                ),
                 ("plain", '{"title": "Bus"}'),
             ):
                 connection.execute(
@@ -208,7 +226,11 @@ class PersistentNoteRemovalTests(MigrationTestCase):
         self.migrate(command.upgrade, "head")
 
         with self.engine.connect() as connection:
-            stored = dict(connection.execute(text("SELECT session_id, metadata_json FROM chat_sessions")).all())
+            stored = dict(
+                connection.execute(
+                    text("SELECT session_id, metadata_json FROM chat_sessions")
+                ).all()
+            )
         self.assertEqual({"title": "Fees", "pending_hitl": None}, stored["noted"])
         self.assertEqual({"title": "Bus"}, stored["plain"])
 
@@ -219,12 +241,20 @@ class ConcurrentUpgradeTests(MigrationTestCase):
         second races the first through the same DDL and dies on a duplicate table."""
         url = make_url(database_url()).set(query={"options": f"-csearch_path={self.schema.name}"})
         argv = [
-            sys.executable, "-m", "alembic", "-c", str(ALEMBIC_INI),
-            "-x", f"db_url={url.render_as_string(hide_password=False)}",
-            "upgrade", "head",
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            str(ALEMBIC_INI),
+            "-x",
+            f"db_url={url.render_as_string(hide_password=False)}",
+            "upgrade",
+            "head",
         ]
         processes = [
-            subprocess.Popen(argv, cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            subprocess.Popen(
+                argv, cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
             for _ in range(2)
         ]
         for process in processes:

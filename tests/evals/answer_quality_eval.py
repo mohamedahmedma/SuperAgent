@@ -36,6 +36,7 @@ be checked against the answer by hand. Its own failures are reported as INVALID 
 than folded into the score: a judge that errored is not evidence that the answer was
 good, and a harness that scores it as a pass would report the opposite of the truth.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -70,10 +71,11 @@ from langchain_core.messages import (  # noqa: E402
 )
 from langchain_core.tools import tool  # noqa: E402
 
+import backend.agent.chat.runtime as runtime  # noqa: E402
 from backend.agent.chat.finalize import Finalizer  # noqa: E402
 from backend.agent.chat.model_output import TOKENS as HARMONY_TOKENS  # noqa: E402
-from backend.agent.prompts import render as render_prompt, resolve as resolve_prompt  # noqa: E402
-import backend.agent.chat.runtime as runtime  # noqa: E402
+from backend.prompts import render as render_prompt  # noqa: E402
+from backend.prompts import resolve as resolve_prompt
 
 _RETRY_COPY = "__retry__"  # stands in for user_copy.retrieval_error; only its presence is scored
 
@@ -86,16 +88,24 @@ FEE_TABLE = [
     "رسوم الصف الثاني الابتدائي: 35,000 جنيه على ثلاث دفعات.",
     "رسوم الصف الرابع الابتدائي: 45,000 جنيه على ثلاث دفعات.",
 ]
-GENERAL_DOC = [
-    "أوراق التحويل المطلوبة لكل الصفوف: شهادة الميلاد، آخر شهادة درجات، وصورة البطاقة."
-]
+GENERAL_DOC = ["أوراق التحويل المطلوبة لكل الصفوف: شهادة الميلاد، آخر شهادة درجات، وصورة البطاقة."]
 
 
 class Scenario:
     """One parent's turn, and what a good answer to it looks like."""
 
-    def __init__(self, key, question, chunks, *, child_year="", discriminate="yes",
-                 must_contain=(), must_not_contain=(), judge_rubric=""):
+    def __init__(
+        self,
+        key,
+        question,
+        chunks,
+        *,
+        child_year="",
+        discriminate="yes",
+        must_contain=(),
+        must_not_contain=(),
+        judge_rubric="",
+    ):
         self.key = key
         self.question = question
         self.chunks = list(chunks)
@@ -173,8 +183,7 @@ SCENARIOS = [
 
 def _corpus_prompt(scenario):
     chunks = "\n\n---\n\n".join(
-        f"[{i}] school_docs.pdf (Page {i}):\n{text}"
-        for i, text in enumerate(scenario.chunks, 1)
+        f"[{i}] school_docs.pdf (Page {i}):\n{text}" for i, text in enumerate(scenario.chunks, 1)
     )
     kwargs = {
         "outcome": "chunks" if scenario.chunks else "no_knowledge",
@@ -213,9 +222,13 @@ def run_turn(scenario, model):
     )
 
     turn_context = resolve_prompt(
-        "", "agent/turn_context.j2",
-        resolved_question="", constraints=[],
-        child_hint="علي", child_year=scenario.child_year, child_options=[],
+        "",
+        "agent/turn_context.j2",
+        resolved_question="",
+        constraints=[],
+        child_hint="علي",
+        child_year=scenario.child_year,
+        child_options=[],
     )
     messages = [SystemMessage(content=turn_context)] if turn_context.strip() else []
     messages.append(HumanMessage(content=scenario.question))
@@ -352,7 +365,8 @@ def judge(scenario, result, judge_model):
     corpus = "\n".join(f"- {c}" for c in scenario.chunks) or "(nothing was retrieved)"
     year_line = (
         f"THE SCHOOL'S RECORDS SAY THIS CHILD IS IN: {scenario.child_year}\n"
-        if scenario.child_year else ""
+        if scenario.child_year
+        else ""
     )
     prompt = JUDGE_PROMPT.format(
         question=scenario.question,
@@ -373,11 +387,16 @@ def judge(scenario, result, judge_model):
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--runs", type=int, default=3,
-                        help="samples per scenario; one proves nothing at temperature>0")
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=3,
+        help="samples per scenario; one proves nothing at temperature>0",
+    )
     parser.add_argument("--scenario", default="", help="run one scenario by key")
-    parser.add_argument("--no-judge", action="store_true",
-                        help="deterministic checks only; no judge calls")
+    parser.add_argument(
+        "--no-judge", action="store_true", help="deterministic checks only; no judge calls"
+    )
     parser.add_argument("--judge-model", default=os.getenv("GRADE_MODEL") or os.getenv("MODEL"))
     parser.add_argument("--verbose", action="store_true", help="print every answer")
     args = parser.parse_args()
@@ -388,22 +407,34 @@ def main() -> int:
         return 2
 
     model = init_chat_model(
-        model=os.getenv("MODEL"), model_provider="openai", api_key=api_key,
-        base_url=base_url, stream_usage=True, temperature=0.2,
+        model=os.getenv("MODEL"),
+        model_provider="openai",
+        api_key=api_key,
+        base_url=base_url,
+        stream_usage=True,
+        temperature=0.2,
     )
-    judge_model = None if args.no_judge else init_chat_model(
-        model=args.judge_model, model_provider="openai", api_key=api_key,
-        base_url=base_url, temperature=0.0,
+    judge_model = (
+        None
+        if args.no_judge
+        else init_chat_model(
+            model=args.judge_model,
+            model_provider="openai",
+            api_key=api_key,
+            base_url=base_url,
+            temperature=0.0,
+        )
     )
 
     scenarios = [s for s in SCENARIOS if not args.scenario or s.key == args.scenario]
     if not scenarios:
-        print(f"no scenario named {args.scenario!r}; known: "
-              f"{', '.join(s.key for s in SCENARIOS)}")
+        print(f"no scenario named {args.scenario!r}; known: {', '.join(s.key for s in SCENARIOS)}")
         return 2
 
-    print(f"model={os.getenv('MODEL')}  provider={os.getenv('LLM_PROVIDER') or 'generic'}  "
-          f"runs={args.runs}  judge={'off' if args.no_judge else args.judge_model}\n")
+    print(
+        f"model={os.getenv('MODEL')}  provider={os.getenv('LLM_PROVIDER') or 'generic'}  "
+        f"runs={args.runs}  judge={'off' if args.no_judge else args.judge_model}\n"
+    )
 
     totals, invalid, suppressed = {}, 0, 0
     for scenario in scenarios:
@@ -424,9 +455,11 @@ def main() -> int:
                 # assistant says something WRONG, and folding it into "good" hides how
                 # often it says nothing at all.
                 suppressed += 1
-                print(f"   run {run_index + 1}: searches={len(result['searches'])} "
-                      f"collapsed={result['duplicates_collapsed']}  "
-                      f"SUPPRESSED — no answer channel; retry copy served")
+                print(
+                    f"   run {run_index + 1}: searches={len(result['searches'])} "
+                    f"collapsed={result['duplicates_collapsed']}  "
+                    f"SUPPRESSED — no answer channel; retry copy served"
+                )
                 continue
 
             checks = deterministic_checks(scenario, result)
@@ -437,7 +470,8 @@ def main() -> int:
 
             line = "  ".join(
                 f"{name.split('_', 1)[0]}:{'ok' if value else 'FAIL'}"
-                for name, value in checks.items() if isinstance(value, bool)
+                for name, value in checks.items()
+                if isinstance(value, bool)
             )
             verdict = ""
             if judge_model is not None:
@@ -452,8 +486,10 @@ def main() -> int:
                     totals[key] = (hit + 1, total + 1)
                     if ruling.get("verdict") == "bad":
                         verdict += f" — {ruling.get('why', '')[:80]}"
-            print(f"   run {run_index + 1}: searches={len(result['searches'])} "
-                  f"collapsed={result['duplicates_collapsed']}  {line}{verdict}")
+            print(
+                f"   run {run_index + 1}: searches={len(result['searches'])} "
+                f"collapsed={result['duplicates_collapsed']}  {line}{verdict}"
+            )
             if args.verbose:
                 print(f"      answer: {result['answer'][:200]}")
             if not checks.get("bug2_every_figure_grounded", True):
@@ -465,11 +501,15 @@ def main() -> int:
         if name.startswith("judge_"):
             print(f"   {name:34} {hit}")
         else:
-            print(f"   {name:34} {hit}/{total}"
-                  f"   {'100%' if hit == total else f'{100 * hit / total:.0f}%'}")
+            print(
+                f"   {name:34} {hit}/{total}"
+                f"   {'100%' if hit == total else f'{100 * hit / total:.0f}%'}"
+            )
     if invalid:
-        print(f"\n   {invalid} run(s) INVALID — not counted as passes. "
-              f"Treat the rates above as provisional.")
+        print(
+            f"\n   {invalid} run(s) INVALID — not counted as passes. "
+            f"Treat the rates above as provisional."
+        )
     # A quality score never fails the build. See the module docstring.
     return 0
 

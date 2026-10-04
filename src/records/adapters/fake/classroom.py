@@ -5,6 +5,7 @@ answers a real one is most likely to flatten into each other: a child with no pl
 room whose subject board nobody has curated, and a room whose staffing nobody has entered.
 See `records/domain/classroom.py`.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

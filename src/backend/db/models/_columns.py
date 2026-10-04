@@ -1,4 +1,5 @@
 """Column definitions every model shares."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

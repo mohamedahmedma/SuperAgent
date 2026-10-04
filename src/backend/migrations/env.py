@@ -21,6 +21,7 @@ Three are specific to this service:
 - **A connection can be handed in** through `config.attributes["connection"]`, which is
   how the tests run every revision inside a throwaway schema.
 """
+
 from __future__ import annotations
 
 import logging

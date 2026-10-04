@@ -3,6 +3,7 @@
 Thin on purpose. The interesting decisions — what a section record contains, when it
 may be reused — live in section_summary.py; this only reads and writes them.
 """
+
 from __future__ import annotations
 
 import logging
@@ -58,7 +59,9 @@ class SectionCatalogueStore:
             with self._unit_of_work() as uow:
                 return list(uow.section_summaries.for_profile(profile))
         except Exception:
-            logger.warning("could not load section summaries for profile %s", profile, exc_info=True)
+            logger.warning(
+                "could not load section summaries for profile %s", profile, exc_info=True
+            )
             return []
 
     def existing_hashes(self, profile: str) -> Dict[str, str]:
@@ -91,4 +94,3 @@ class SectionCatalogueStore:
             if removed:
                 uow.commit()
         return removed
-

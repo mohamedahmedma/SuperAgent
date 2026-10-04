@@ -7,10 +7,10 @@ about individual signals than about two invariants:
   * a cheap rung can never establish something only a model could know;
   * a policy below its certainty floor degrades rather than guessing.
 """
+
 import unittest
 from unittest.mock import patch
 
-from backend.agent.profiles.registry import load_profile
 from backend.agent.rag.evidence import (
     AssessmentContext,
     AssessmentLadder,
@@ -28,10 +28,15 @@ from backend.agent.rag.policy import (
     select_context_indices,
     select_evidence,
 )
+from backend.profiles.registry import load_profile
 
 
 def rag_config(**overrides):
-    return load_profile("base").rag.model_copy(update=overrides) if overrides else load_profile("base").rag
+    return (
+        load_profile("base").rag.model_copy(update=overrides)
+        if overrides
+        else load_profile("base").rag
+    )
 
 
 def doc(text="The school partners are Cairo University and the British Council."):
@@ -159,8 +164,11 @@ class LadderTests(unittest.TestCase):
                 return None
 
         ladder = AssessmentLadder(
-            [Recorder("high", Certainty.HIGH), Recorder("low", Certainty.LOW),
-             Recorder("mid", Certainty.MEDIUM)],
+            [
+                Recorder("high", Certainty.HIGH),
+                Recorder("low", Certainty.LOW),
+                Recorder("mid", Certainty.MEDIUM),
+            ],
             required=Certainty.HIGH,
         )
         ladder.run(ctx())
@@ -180,12 +188,22 @@ class LadderTests(unittest.TestCase):
         self.assertEqual(["grader"], report.assessed_by)
 
     def test_provenance_names_every_rung_that_contributed(self):
-        low = StubAssessor("lex", Certainty.LOW, EvidenceReport(
-            certainty=Certainty.LOW, confidence=0.4,
-            chunks=[ChunkAssessment(index=1, signals={"lexical_coverage": 0.4})],
-            assessed_by=["lex"], reasons=["lexical coverage 0.40"]))
-        high = StubAssessor("grader", Certainty.HIGH, report_at(
-            Certainty.HIGH, assessed_by=["grader"], reasons=["grader routed to answer"]))
+        low = StubAssessor(
+            "lex",
+            Certainty.LOW,
+            EvidenceReport(
+                certainty=Certainty.LOW,
+                confidence=0.4,
+                chunks=[ChunkAssessment(index=1, signals={"lexical_coverage": 0.4})],
+                assessed_by=["lex"],
+                reasons=["lexical coverage 0.40"],
+            ),
+        )
+        high = StubAssessor(
+            "grader",
+            Certainty.HIGH,
+            report_at(Certainty.HIGH, assessed_by=["grader"], reasons=["grader routed to answer"]),
+        )
 
         report = AssessmentLadder([low, high], required=Certainty.HIGH).run(ctx())
         self.assertEqual(["lex", "grader"], report.assessed_by)
@@ -194,13 +212,24 @@ class LadderTests(unittest.TestCase):
         self.assertIn("grader routed to answer", report.reasons)
 
     def test_cheap_per_chunk_signals_survive_the_merge(self):
-        low = StubAssessor("lex", Certainty.LOW, EvidenceReport(
-            certainty=Certainty.LOW,
-            chunks=[ChunkAssessment(index=1, signals={"lexical_coverage": 0.9})],
-            assessed_by=["lex"]))
-        high = StubAssessor("grader", Certainty.HIGH, report_at(
-            Certainty.HIGH, chunks=[ChunkAssessment(index=1, supported=True)],
-            assessed_by=["grader"]))
+        low = StubAssessor(
+            "lex",
+            Certainty.LOW,
+            EvidenceReport(
+                certainty=Certainty.LOW,
+                chunks=[ChunkAssessment(index=1, signals={"lexical_coverage": 0.9})],
+                assessed_by=["lex"],
+            ),
+        )
+        high = StubAssessor(
+            "grader",
+            Certainty.HIGH,
+            report_at(
+                Certainty.HIGH,
+                chunks=[ChunkAssessment(index=1, supported=True)],
+                assessed_by=["grader"],
+            ),
+        )
 
         report = AssessmentLadder([low, high], required=Certainty.HIGH).run(ctx())
         chunk = report.chunks[0]
@@ -218,8 +247,12 @@ class LadderTests(unittest.TestCase):
 class RoutePolicyTests(unittest.TestCase):
     def setUp(self):
         self.config = rag_config()
-        self.kwargs = {"has_docs": True, "rewrite_count": 0, "is_sub_agent": False,
-                       "config": self.config}
+        self.kwargs = {
+            "has_docs": True,
+            "rewrite_count": 0,
+            "is_sub_agent": False,
+            "config": self.config,
+        }
 
     def test_sufficient_evidence_answers(self):
         route, _ = decide_route(report_at(Certainty.HIGH), **self.kwargs)
@@ -246,25 +279,30 @@ class RoutePolicyTests(unittest.TestCase):
         forms are answered from instead."""
         route, _ = decide_route(
             report_at(Certainty.HIGH, ambiguity="missing_slot", missing_slots=["grade"]),
-            **self.kwargs)
+            **self.kwargs,
+        )
         self.assertEqual("clarify", route)
         route, _ = decide_route(
-            report_at(Certainty.HIGH, ambiguity="multiple_candidates",
-                      hitl_options=["Grade 5", "Grade 6"]),
-            **self.kwargs)
+            report_at(
+                Certainty.HIGH, ambiguity="multiple_candidates", hitl_options=["Grade 5", "Grade 6"]
+            ),
+            **self.kwargs,
+        )
         self.assertEqual("scope_select", route)
 
     def test_a_sub_agent_keeps_partial_evidence_for_synthesis(self):
-        report = report_at(Certainty.HIGH, relevance="weak", sufficiency="partial",
-                           preferred_route="rewrite")
+        report = report_at(
+            Certainty.HIGH, relevance="weak", sufficiency="partial", preferred_route="rewrite"
+        )
         route, _ = decide_route(report, **{**self.kwargs, "is_sub_agent": True})
         self.assertEqual("answer", route)
 
     def test_a_sub_agent_keeps_on_subject_evidence_that_answers_nothing_alone(self):
         """A sibling sub-question may carry the half this one is missing, and only
         synthesis can see both. Dropping it here decides that before anything looked."""
-        report = report_at(Certainty.HIGH, relevance="weak", sufficiency="none",
-                           preferred_route="rewrite")
+        report = report_at(
+            Certainty.HIGH, relevance="weak", sufficiency="none", preferred_route="rewrite"
+        )
         route, _ = decide_route(report, **{**self.kwargs, "is_sub_agent": True})
         self.assertEqual("answer", route)
 
@@ -283,8 +321,9 @@ class RoutePolicyTests(unittest.TestCase):
         on the weaker evidence. Reachable whenever the cross-encoder is on and the grader
         above it is unconfigured or unreachable: its score alone ended the turn.
         """
-        report = report_at(Certainty.MEDIUM, relevance="none", sufficiency="none",
-                           preferred_route="no_knowledge")
+        report = report_at(
+            Certainty.MEDIUM, relevance="none", sufficiency="none", preferred_route="no_knowledge"
+        )
         route, reason = decide_route(report, **self.kwargs)
         self.assertEqual("retrieval_error", route)
         self.assertIn("medium", reason)
@@ -293,8 +332,9 @@ class RoutePolicyTests(unittest.TestCase):
         """Where the line sits is the profile's to set. This moves the line, it does not
         remove it."""
         config = rag_config(evidence_required_certainty="medium")
-        report = report_at(Certainty.MEDIUM, relevance="none", sufficiency="none",
-                           preferred_route="no_knowledge")
+        report = report_at(
+            Certainty.MEDIUM, relevance="none", sufficiency="none", preferred_route="no_knowledge"
+        )
         route, _ = decide_route(report, **{**self.kwargs, "config": config})
         self.assertEqual("no_knowledge", route)
 
@@ -309,18 +349,19 @@ class RoutePolicyTests(unittest.TestCase):
         every partner were retrieved, the grader said they do not DEFINE the term, and
         the turn denied having any relevant information — with the partner image
         attached to the denial. A denial now requires evidence about another subject."""
-        report = report_at(Certainty.HIGH, relevance="strong", sufficiency="none",
-                           preferred_route="no_knowledge")
+        report = report_at(
+            Certainty.HIGH, relevance="strong", sufficiency="none", preferred_route="no_knowledge"
+        )
         route, _ = decide_route(report, **{**self.kwargs, "rewrite_count": 99})
         self.assertEqual("answer", route)
 
     def test_evidence_below_sufficient_spends_its_rewrite_before_answering(self):
         """The rewrite is the cheap chance to close the gap — but only a chance."""
-        report = report_at(Certainty.HIGH, relevance="weak", sufficiency="none",
-                           preferred_route="no_knowledge")
+        report = report_at(
+            Certainty.HIGH, relevance="weak", sufficiency="none", preferred_route="no_knowledge"
+        )
         self.assertEqual("rewrite", decide_route(report, **self.kwargs)[0])
-        self.assertEqual(
-            "answer", decide_route(report, **{**self.kwargs, "rewrite_count": 1})[0])
+        self.assertEqual("answer", decide_route(report, **{**self.kwargs, "rewrite_count": 1})[0])
 
 
 class ScopeDirectionTests(unittest.TestCase):
@@ -335,8 +376,12 @@ class ScopeDirectionTests(unittest.TestCase):
 
     def setUp(self):
         self.config = rag_config()
-        self.kwargs = {"has_docs": True, "rewrite_count": 0, "is_sub_agent": False,
-                       "config": self.config}
+        self.kwargs = {
+            "has_docs": True,
+            "rewrite_count": 0,
+            "is_sub_agent": False,
+            "config": self.config,
+        }
         self.directions = ["What is a partnership?", "Which organizations are partners?"]
 
     def _below_sufficient(self, **overrides):
@@ -346,28 +391,31 @@ class ScopeDirectionTests(unittest.TestCase):
 
     def test_directions_are_offered_instead_of_a_rewrite(self):
         route, reason = decide_route(
-            self._below_sufficient(), scope_options=self.directions, **self.kwargs)
+            self._below_sufficient(), scope_options=self.directions, **self.kwargs
+        )
         self.assertEqual("scope_select", route)
         self.assertIn("asking before rewriting", reason)
 
     def test_one_direction_is_not_a_choice(self):
         """A menu of one is not a question. It rewrites, exactly as before."""
         route, _ = decide_route(
-            self._below_sufficient(), scope_options=["What is a partnership?"], **self.kwargs)
+            self._below_sufficient(), scope_options=["What is a partnership?"], **self.kwargs
+        )
         self.assertEqual("rewrite", route)
 
     def test_sufficient_evidence_is_answered_not_offered(self):
         """Directions exist on most turns. They must only matter when the evidence
         fell short — otherwise every good answer becomes a question first."""
         route, _ = decide_route(
-            report_at(Certainty.HIGH), scope_options=self.directions, **self.kwargs)
+            report_at(Certainty.HIGH), scope_options=self.directions, **self.kwargs
+        )
         self.assertEqual("answer", route)
 
     def test_the_user_is_still_asked_only_once(self):
         """The limit the user set, enforced where every other ask is enforced."""
         route, _ = decide_route(
-            self._below_sufficient(), scope_options=self.directions,
-            hitl_rounds=1, **self.kwargs)
+            self._below_sufficient(), scope_options=self.directions, hitl_rounds=1, **self.kwargs
+        )
         self.assertNotEqual("scope_select", route)
         self.assertEqual("rewrite", route)
 
@@ -375,8 +423,11 @@ class ScopeDirectionTests(unittest.TestCase):
         """Round two, rewrite spent: the turn ends in an answer, not another question
         and not a denial."""
         route, _ = decide_route(
-            self._below_sufficient(), scope_options=self.directions,
-            hitl_rounds=1, **{**self.kwargs, "rewrite_count": 1})
+            self._below_sufficient(),
+            scope_options=self.directions,
+            hitl_rounds=1,
+            **{**self.kwargs, "rewrite_count": 1},
+        )
         self.assertEqual("answer", route)
 
     def test_catalogued_directions_rescue_an_ask_the_grader_left_unnamed(self):
@@ -384,7 +435,8 @@ class ScopeDirectionTests(unittest.TestCase):
         disguise. The corpus supplies the list the grader failed to write."""
         report = self._below_sufficient(ambiguity="multiple_candidates", hitl_options=[])
         allowed, reason = can_ask_human(
-            report, hitl_rounds=0, config=self.config, scope_options=self.directions)
+            report, hitl_rounds=0, config=self.config, scope_options=self.directions
+        )
         self.assertTrue(allowed)
         self.assertIn("catalogued directions", reason)
 
@@ -392,10 +444,12 @@ class ScopeDirectionTests(unittest.TestCase):
         self.assertFalse(vetoed)
 
     def test_the_graders_own_options_win_when_it_wrote_them(self):
-        report = self._below_sufficient(ambiguity="multiple_candidates",
-                                        hitl_options=["Grade 5", "Grade 6"])
+        report = self._below_sufficient(
+            ambiguity="multiple_candidates", hitl_options=["Grade 5", "Grade 6"]
+        )
         allowed, reason = can_ask_human(
-            report, hitl_rounds=0, config=self.config, scope_options=self.directions)
+            report, hitl_rounds=0, config=self.config, scope_options=self.directions
+        )
         self.assertTrue(allowed)
         self.assertIn("named candidates", reason)
 
@@ -405,15 +459,18 @@ class ContextPolicyTests(unittest.TestCase):
         self.docs = [doc()] * 4
 
     def _report(self, certainty, supported=()):
-        chunks = [ChunkAssessment(index=i, supported=(i in supported) if supported else None)
-                  for i in range(1, 5)]
+        chunks = [
+            ChunkAssessment(index=i, supported=(i in supported) if supported else None)
+            for i in range(1, 5)
+        ]
         return report_at(certainty, chunks=chunks)
 
     def test_the_shipped_default_trims_to_the_named_chunks(self):
         """rag_config() here is the profile UNMODIFIED, so this pins what a deployment
         actually does — the tests below force adaptive and cover the mechanism."""
         keep, reason = select_context_indices(
-            self._report(Certainty.HIGH, supported=(1,)), self.docs, rag_config())
+            self._report(Certainty.HIGH, supported=(1,)), self.docs, rag_config()
+        )
         self.assertEqual([1], keep)
         self.assertIn("1 of 4", reason)
 
@@ -428,7 +485,8 @@ class ContextPolicyTests(unittest.TestCase):
     def test_trims_to_the_chunks_an_assessment_named(self):
         config = rag_config(context_selection_mode="adaptive")
         keep, reason = select_context_indices(
-            self._report(Certainty.HIGH, supported=(1, 3)), self.docs, config)
+            self._report(Certainty.HIGH, supported=(1, 3)), self.docs, config
+        )
         self.assertEqual([1, 3], keep)
         self.assertIn("2 of 4", reason)
 
@@ -442,13 +500,15 @@ class ContextPolicyTests(unittest.TestCase):
     def test_every_chunk_supported_sends_everything(self):
         config = rag_config(context_selection_mode="adaptive")
         keep, _ = select_context_indices(
-            self._report(Certainty.HIGH, supported=(1, 2, 3, 4)), self.docs, config)
+            self._report(Certainty.HIGH, supported=(1, 2, 3, 4)), self.docs, config
+        )
         self.assertIsNone(keep)
 
     def test_the_floor_pads_from_the_ranking(self):
         config = rag_config(context_selection_mode="adaptive", context_min_chunks=3)
         keep, _ = select_context_indices(
-            self._report(Certainty.HIGH, supported=(2,)), self.docs, config)
+            self._report(Certainty.HIGH, supported=(2,)), self.docs, config
+        )
         self.assertEqual(3, len(keep))
         self.assertIn(2, keep)
 
@@ -457,11 +517,21 @@ class ReportTraceTests(unittest.TestCase):
     def test_existing_trace_field_names_are_preserved(self):
         """The frontend and any integrating client read these names; the report is an
         internal refactor and must not be a breaking API change."""
-        trace = report_at(Certainty.HIGH, chunks=[ChunkAssessment(index=1, supported=True)],
-                          confidence=0.9, reasons=["grader said so"],
-                          assessed_by=["llm_grader"]).as_trace()
-        for key in ("evidence_relevance", "evidence_answerability", "evidence_ambiguity",
-                    "evidence_confidence", "evidence_reason", "missing_slots"):
+        trace = report_at(
+            Certainty.HIGH,
+            chunks=[ChunkAssessment(index=1, supported=True)],
+            confidence=0.9,
+            reasons=["grader said so"],
+            assessed_by=["llm_grader"],
+        ).as_trace()
+        for key in (
+            "evidence_relevance",
+            "evidence_answerability",
+            "evidence_ambiguity",
+            "evidence_confidence",
+            "evidence_reason",
+            "missing_slots",
+        ):
             self.assertIn(key, trace)
         self.assertEqual("sufficient", trace["evidence_answerability"])
 
@@ -471,10 +541,13 @@ class ReportTraceTests(unittest.TestCase):
         self.assertEqual(["lexical", "cross_encoder"], trace["evidence_assessed_by"])
 
     def test_supported_chunks_reach_the_trace(self):
-        report = report_at(Certainty.HIGH, chunks=[
-            ChunkAssessment(index=1, supported=True),
-            ChunkAssessment(index=2, supported=False),
-        ])
+        report = report_at(
+            Certainty.HIGH,
+            chunks=[
+                ChunkAssessment(index=1, supported=True),
+                ChunkAssessment(index=2, supported=False),
+            ],
+        )
         self.assertEqual([1], report.as_trace()["evidence_supported_chunks"])
 
 
@@ -498,8 +571,11 @@ class GraderAssessorTests(unittest.TestCase):
         import backend.agent.rag.pipeline as pipeline
 
         grade = pipeline.EvidenceGrade(
-            relevance="strong", answerability="sufficient", route="answer",
-            confidence=0.9, supporting_chunks=[1, 3],
+            relevance="strong",
+            answerability="sufficient",
+            route="answer",
+            confidence=0.9,
+            supporting_chunks=[1, 3],
         )
         module, grader = self._assessor_with(grade)
         with patch.object(module, "_get_grader_model", lambda: grader):
@@ -509,12 +585,14 @@ class GraderAssessorTests(unittest.TestCase):
         self.assertEqual([1, 3], report.supported_indices())
 
     def test_an_empty_supporting_list_leaves_every_chunk_unjudged(self):
-        """"It did not tell us" and "it excluded this chunk" are different facts, and
+        """ "It did not tell us" and "it excluded this chunk" are different facts, and
         conflating them would silently drop evidence."""
         import backend.agent.rag.pipeline as pipeline
 
         grade = pipeline.EvidenceGrade(
-            relevance="strong", answerability="sufficient", route="answer",
+            relevance="strong",
+            answerability="sufficient",
+            route="answer",
             supporting_chunks=[],
         )
         module, grader = self._assessor_with(grade)
@@ -528,7 +606,9 @@ class GraderAssessorTests(unittest.TestCase):
         import backend.agent.rag.pipeline as pipeline
 
         grade = pipeline.EvidenceGrade(
-            relevance="strong", answerability="sufficient", route="answer",
+            relevance="strong",
+            answerability="sufficient",
+            route="answer",
             supporting_chunks=[2, 99, 0, -1],
         )
         module, grader = self._assessor_with(grade)
@@ -554,12 +634,20 @@ class HumanInTheLoopTests(unittest.TestCase):
 
     def setUp(self):
         self.config = rag_config()
-        self.kwargs = {"has_docs": True, "rewrite_count": 99, "is_sub_agent": False,
-                       "config": self.config}
+        self.kwargs = {
+            "has_docs": True,
+            "rewrite_count": 99,
+            "is_sub_agent": False,
+            "config": self.config,
+        }
 
     def _report(self, **overrides):
-        fields = {"certainty": Certainty.HIGH, "relevance": "weak",
-                  "sufficiency": "partial", "chunks": [ChunkAssessment(index=1)]}
+        fields = {
+            "certainty": Certainty.HIGH,
+            "relevance": "weak",
+            "sufficiency": "partial",
+            "chunks": [ChunkAssessment(index=1)],
+        }
         fields.update(overrides)
         return EvidenceReport(**fields)
 
@@ -582,12 +670,14 @@ class HumanInTheLoopTests(unittest.TestCase):
 
     def test_scope_selection_needs_named_candidates(self):
         route, _ = decide_route(
-            self._report(ambiguity="multiple_candidates", hitl_options=[]), **self.kwargs)
+            self._report(ambiguity="multiple_candidates", hitl_options=[]), **self.kwargs
+        )
         self.assertEqual("answer", route)
 
         route, _ = decide_route(
             self._report(ambiguity="multiple_candidates", hitl_options=["Grade 5", "Grade 6"]),
-            **self.kwargs)
+            **self.kwargs,
+        )
         self.assertEqual("scope_select", route)
 
     def test_the_user_is_asked_at_most_once_per_question(self):
@@ -611,14 +701,17 @@ class HumanInTheLoopTests(unittest.TestCase):
         information — which is both a contradiction and the least recoverable thing to
         tell someone who has just co-operated.
         """
-        report = self._report(sufficiency="none", ambiguity="missing_slot",
-                              missing_slots=["grade"])
+        report = self._report(sufficiency="none", ambiguity="missing_slot", missing_slots=["grade"])
         self.assertEqual("answer", decide_route(report, hitl_rounds=1, **self.kwargs)[0])
 
     def test_sufficient_evidence_is_never_interrupted(self):
-        report = self._report(relevance="strong", sufficiency="sufficient",
-                              preferred_route="answer",
-                              ambiguity="missing_slot", missing_slots=["grade"])
+        report = self._report(
+            relevance="strong",
+            sufficiency="sufficient",
+            preferred_route="answer",
+            ambiguity="missing_slot",
+            missing_slots=["grade"],
+        )
         # A named slot still yields to a report that says the evidence answers it.
         route, _ = decide_route(report, hitl_rounds=0, **self.kwargs)
         self.assertEqual("clarify", route, "the grader's ambiguity verdict still wins")
@@ -627,8 +720,9 @@ class HumanInTheLoopTests(unittest.TestCase):
         """Without this, "ask once" would mean "once per graph run", which is every run."""
         from backend.agent.schemas.chat import HitlResumeState
 
-        state = HitlResumeState(question="q", route="clarify",
-                                retrieval_status="needs_clarification", hitl_rounds=1)
+        state = HitlResumeState(
+            question="q", route="clarify", retrieval_status="needs_clarification", hitl_rounds=1
+        )
         self.assertEqual(1, state.model_dump()["hitl_rounds"])
 
 
@@ -645,8 +739,7 @@ class EvidenceIsChosenBeforeItIsJudgedTests(unittest.TestCase):
 
     @staticmethod
     def _docs(count, size=100):
-        return [{"text": f"chunk {i} " + "x" * size, "chunk_id": f"c{i}"}
-                for i in range(count)]
+        return [{"text": f"chunk {i} " + "x" * size, "chunk_id": f"c{i}"} for i in range(count)]
 
     def test_the_graded_set_is_the_answer_set(self):
         kept, reason = select_evidence(self._docs(16), max_chunks=8, max_chars=100_000)

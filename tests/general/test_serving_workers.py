@@ -5,6 +5,7 @@ stub model, 80 parents: 1 worker 4.64 turns/s (first word p50 13.9 s), 2 workers
 (6.8 s), 4 workers 10.09 (5.3 s). Workers are separate processes, so each opens its own
 database pool: the pool is therefore a share of one budget, not a fixed size per process.
 """
+
 import unittest
 from unittest.mock import patch
 

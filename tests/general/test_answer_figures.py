@@ -52,6 +52,7 @@ check. The tool renders the grid and the model writes the sentence beside it, so
 prose worth checking is what a turn wrote from RETRIEVED CHUNKS — which is exactly where
 the fee incident was.
 """
+
 import collections
 import unittest
 from unittest.mock import patch
@@ -119,9 +120,24 @@ DISCOUNTS = (
 #: Every distinct amount the corpus states. All eighteen are comma-grouped and none falls
 #: in the calendar band, which is what makes the year rule free.
 CORPUS_AMOUNTS = (
-    "2,500", "3,000", "4,000", "17,600", "26,400", "75,000", "85,000", "88,000",
-    "95,000", "98,000", "105,000", "115,000", "120,000", "130,000", "135,000",
-    "145,000", "150,000", "160,000",
+    "2,500",
+    "3,000",
+    "4,000",
+    "17,600",
+    "26,400",
+    "75,000",
+    "85,000",
+    "88,000",
+    "95,000",
+    "98,000",
+    "105,000",
+    "115,000",
+    "120,000",
+    "130,000",
+    "135,000",
+    "145,000",
+    "150,000",
+    "160,000",
 )
 
 PRICED = "\n".join((FEES, CAMP, INSTALMENTS))
@@ -169,27 +185,39 @@ TheIncidentThisExistsForTests = _suite(
     This asks a narrower question than "is it in the corpus": is it in the evidence THIS
     answer was written from.""",
     [
-        case("a_fee_from_the_wrong_row_is_caught",
-             "مصاريف Year 3 هي 88,000 جنيه في السنة.",
-             "Y03–Y05 | 105,000 EGP | 115,000 EGP", ["88000"],
-             "Verbatim from the deployment: Year 3 answered with the FS1-FS2 figure."),
-        case("the_same_failure_in_english",
-             "Year 3 costs 88,000 EGP per year.",
-             "Y03–Y05 | 105,000 EGP | 115,000 EGP", ["88000"]),
+        case(
+            "a_fee_from_the_wrong_row_is_caught",
+            "مصاريف Year 3 هي 88,000 جنيه في السنة.",
+            "Y03–Y05 | 105,000 EGP | 115,000 EGP",
+            ["88000"],
+            "Verbatim from the deployment: Year 3 answered with the FS1-FS2 figure.",
+        ),
+        case(
+            "the_same_failure_in_english",
+            "Year 3 costs 88,000 EGP per year.",
+            "Y03–Y05 | 105,000 EGP | 115,000 EGP",
+            ["88000"],
+        ),
         case("the_right_fee_passes", "مصاريف Year 3 هي 105,000 جنيه في السنة.", FEES, []),
-        case("a_tier_the_evidence_does_not_cover",
-             "Y11 fees are 150,000 EGP.",
-             "Y03–Y05 | 105,000 EGP | 115,000 EGP", ["150000"],
-             "Correct against the corpus, wrong against the evidence retrieved — and "
-             "that is the reported case, because the turn had no way to know it."),
+        case(
+            "a_tier_the_evidence_does_not_cover",
+            "Y11 fees are 150,000 EGP.",
+            "Y03–Y05 | 105,000 EGP | 115,000 EGP",
+            ["150000"],
+            "Correct against the corpus, wrong against the evidence retrieved — and "
+            "that is the reported case, because the turn had no way to know it.",
+        ),
         case("the_camp_price_quoted_as_a_school_fee", "الرسوم 2,500 جنيه", FEES, ["2500"]),
         case("an_amount_no_row_states", "the fee is 111,000 EGP", FEES, ["111000"]),
         case("a_fee_missing_a_digit", "the fee is 10,500 EGP", FEES, ["10500"]),
-        case("the_wrong_column_is_NOT_caught",
-             "Y03 fees are 115,000 EGP for Egyptian families.",
-             "Y03–Y05 | 105,000 EGP | 115,000 EGP", [],
-             "A limit worth stating: both columns are on the row, so reading across it "
-             "is invisible here. This catches the wrong LINE, not the wrong cell."),
+        case(
+            "the_wrong_column_is_NOT_caught",
+            "Y03 fees are 115,000 EGP for Egyptian families.",
+            "Y03–Y05 | 105,000 EGP | 115,000 EGP",
+            [],
+            "A limit worth stating: both columns are on the row, so reading across it "
+            "is invisible here. This catches the wrong LINE, not the wrong cell.",
+        ),
     ],
 )
 
@@ -204,8 +232,12 @@ EveryAmountTheCorpusStatesTests = _suite(
     firing is a correct answer withdrawn, which is the failure that retired the last
     check, so they are enumerated rather than sampled.""",
     [
-        case("grounded_%s" % amount.replace(",", ""),
-             "The fee is %s EGP per year." % amount, PRICED, [])
+        case(
+            "grounded_%s" % amount.replace(",", ""),
+            "The fee is %s EGP per year." % amount,
+            PRICED,
+            [],
+        )
         for amount in CORPUS_AMOUNTS
     ],
 )
@@ -232,9 +264,14 @@ TheSameFigureWrittenDifferentlyTests = _suite(
         case("arabic_indic_digits", "المصاريف ١٠٥٬٠٠٠ جنيه", FEES, []),
         case("eastern_arabic_indic_digits", "المصاريف ۱۰۵٬۰۰۰ جنيه", FEES, []),
         case("digits_from_two_scripts_in_one_figure", "المصاريف 105٬٠٠٠ جنيه", FEES, []),
-        case("wrapped_in_bidi_marks", "الرسوم ‏105,000‏ جنيه", FEES, [],
-             "A right-to-left mark is invisible in the answer. Splitting a figure on one "
-             "reports both halves against an answer that stated neither."),
+        case(
+            "wrapped_in_bidi_marks",
+            "الرسوم ‏105,000‏ جنيه",
+            FEES,
+            [],
+            "A right-to-left mark is invisible in the answer. Splitting a figure on one "
+            "reports both halves against an answer that stated neither.",
+        ),
         case("split_by_a_zero_width_space", "the fee is 105​000 EGP", FEES, []),
         case("grouped_answer_ungrouped_evidence", "105,000", "the fee is 105000 EGP", []),
         case("ungrouped_answer_grouped_evidence", "105000", "the fee is 105,000 EGP", []),
@@ -252,41 +289,81 @@ FiguresThatAreNotAmountsTests = _suite(
     by construction. These are the corpus's own times, dates, labels, rates and counts —
     and the two faults that retired the previous check.""",
     [
-        case("school_hours", "Hours: 7:45 AM–2:30 PM", NOTHING, [],
-             "«10:00» read as 10,000 withdrew a correct timetable. Two digits at a time, "
-             "so the check never sees a clock."),
+        case(
+            "school_hours",
+            "Hours: 7:45 AM–2:30 PM",
+            NOTHING,
+            [],
+            "«10:00» read as 10,000 withdrew a correct timetable. Two digits at a time, "
+            "so the check never sees a clock.",
+        ),
         case("school_hours_in_arabic", "المدرسة من ٧:٤٥ صباحًا حتى ٢:٣٠ مساءً", NOTHING, []),
         case("an_after_school_range", "(7am-3:30 pm)", NOTHING, []),
         case("a_semester_start", "1st: 15/09 - 18/12", NOTHING, []),
-        case("all_three_semesters",
-             "1st: 15/09 - 18/12, 2nd: 11/01 - 26/03, 3rd: 12/04 - 25/06", NOTHING, []),
-        case("the_sibling_discount", "a 7% discount for second and subsequent children",
-             NOTHING, []),
+        case(
+            "all_three_semesters",
+            "1st: 15/09 - 18/12, 2nd: 11/01 - 26/03, 3rd: 12/04 - 25/06",
+            NOTHING,
+            [],
+        ),
+        case(
+            "the_sibling_discount", "a 7% discount for second and subsequent children", NOTHING, []
+        ),
         case("a_rate_with_a_space_before_the_sign", "Term 3 (30 %): 1st March", NOTHING, []),
         case("a_rate_on_a_term", "40% for Term 2, paid upon acceptance", NOTHING, []),
-        case("a_three_digit_rate", "100% of our teachers are certified", NOTHING, [],
-             "The lower bound drops 7% and 40% on length alone; 100% it does not, and an "
-             "answer saying 100% of anything has not invented the amount one hundred."),
+        case(
+            "a_three_digit_rate",
+            "100% of our teachers are certified",
+            NOTHING,
+            [],
+            "The lower bound drops 7% and 40% on length alone; 100% it does not, and an "
+            "answer saying 100% of anything has not invented the amount one hundred.",
+        ),
         case("an_arabic_percent_sign", "خصم ٧٪ للأخ التاني", NOTHING, []),
         case("a_three_digit_rate_in_arabic", "١٠٠٪ من المدرسين معتمدين", NOTHING, []),
-        case("a_percent_sign_written_first", "٪١٠٠ من المدرسين معتمدين", NOTHING, [],
-             "Arabic is written both ways round, so the sign is read on either side."),
-        case("a_rate_next_to_an_amount", "خصم ٧٪ على 105,000 جنيه", FEES, [],
-             "The rate leaves and the amount stays."),
+        case(
+            "a_percent_sign_written_first",
+            "٪١٠٠ من المدرسين معتمدين",
+            NOTHING,
+            [],
+            "Arabic is written both ways round, so the sign is read on either side.",
+        ),
+        case(
+            "a_rate_next_to_an_amount",
+            "خصم ٧٪ على 105,000 جنيه",
+            FEES,
+            [],
+            "The rate leaves and the amount stays.",
+        ),
         case("year_group_labels", "Y01–Y02 and Y11–Y12", NOTHING, []),
         case("foundation_stage_labels", "FS1–FS2 pupils", NOTHING, []),
-        case("an_assessment_name", "the CAT4 assessment in Years 4, 7 and 9", NOTHING, [],
-             "«4, 7» is two figures. Joining a list into 47 — or 479 — manufactures an "
-             "amount to report against an answer that never stated one."),
+        case(
+            "an_assessment_name",
+            "the CAT4 assessment in Years 4, 7 and 9",
+            NOTHING,
+            [],
+            "«4, 7» is two figures. Joining a list into 47 — or 479 — manufactures an "
+            "amount to report against an answer that never stated one.",
+        ),
         case("a_class_size", "classes of 18 students", NOTHING, []),
         case("an_ordinal_date", "the school year ends on 02nd July", NOTHING, []),
-        case("a_decimal_grade", "she scored 87.5 in the assessment", NOTHING, [],
-             "A full stop is not a separator: 87.5 is a grade, not 875."),
+        case(
+            "a_decimal_grade",
+            "she scored 87.5 in the assessment",
+            NOTHING,
+            [],
+            "A full stop is not a separator: 87.5 is a grade, not 875.",
+        ),
         case("two_digit_counts", "3 semesters and 12 subjects", NOTHING, []),
         case("a_country_code_alone", "reach us on (+20)", NOTHING, []),
-        case("an_arabic_multiplier_word", "المصاريف 45 ألف", NOTHING, [],
-             "The retired check parsed «ألف» as a thousand and turned a clock into a "
-             "price. Nothing here reads a figure's meaning."),
+        case(
+            "an_arabic_multiplier_word",
+            "المصاريف 45 ألف",
+            NOTHING,
+            [],
+            "The retired check parsed «ألف» as a thousand and turned a clock into a "
+            "price. Nothing here reads a figure's meaning.",
+        ),
         case("a_figure_inside_a_clock_is_not_a_figure", "45 حصة", "the day starts at 07:45", []),
         case("a_single_digit", "1 child", NOTHING, []),
         case("a_two_digit_figure", "99 places remain", NOTHING, []),
@@ -306,27 +383,34 @@ IdentifiersAreNotAmountsTests = _suite(
     [
         case("a_spaced_mobile", "call (+20) 100 000 0000", NOTHING, []),
         case("an_unspaced_mobile", "call +201000000000", NOTHING, []),
-        case("the_two_mobile_forms_are_never_compared",
-             "You can reach the school on +201000000000.",
-             "Mobile Phone: (+20) 100 000 0000", [],
-             "Both forms are in the shipped corpus, one line apart. Reading either as an "
-             "amount reports a correct answer."),
-        case("and_the_other_way_round",
-             "You can reach the school on (+20) 100 000 0000.",
-             "Mobile Phone: +201000000000", []),
+        case(
+            "the_two_mobile_forms_are_never_compared",
+            "You can reach the school on +201000000000.",
+            "Mobile Phone: (+20) 100 000 0000",
+            [],
+            "Both forms are in the shipped corpus, one line apart. Reading either as an "
+            "amount reports a correct answer.",
+        ),
+        case(
+            "and_the_other_way_round",
+            "You can reach the school on (+20) 100 000 0000.",
+            "Mobile Phone: +201000000000",
+            [],
+        ),
         case("a_whatsapp_line", "WhatsApp: (+20) 100 000 0000 - Not for updates", NOTHING, []),
         case("an_iban", "IBAN Number: EG00 0000 0000 0000 0000 0000 0000 0", NOTHING, []),
-        case("an_iban_with_its_spaces_removed", "IBAN EG000000000000000000000000000",
-             CONTACT, []),
+        case("an_iban_with_its_spaces_removed", "IBAN EG000000000000000000000000000", CONTACT, []),
         case("an_account_number", "Account Number: 0000-0000-0000-0000", CONTACT, []),
-        case("an_account_number_without_hyphens", "Account Number: 0000000000000000",
-             CONTACT, []),
-        case("a_school_id_with_its_evidence", "All under Mock School ID EG-MOCK-001",
-             CALENDAR, []),
-        case("a_school_id_without_its_evidence", "Mock School ID EG-MOCK-001", NOTHING,
-             ["001"],
-             "Three digits is three digits. A short identifier IS checked, and grounds "
-             "itself whenever its own line was retrieved."),
+        case("an_account_number_without_hyphens", "Account Number: 0000000000000000", CONTACT, []),
+        case("a_school_id_with_its_evidence", "All under Mock School ID EG-MOCK-001", CALENDAR, []),
+        case(
+            "a_school_id_without_its_evidence",
+            "Mock School ID EG-MOCK-001",
+            NOTHING,
+            ["001"],
+            "Three digits is three digits. A short identifier IS checked, and grounds "
+            "itself whenever its own line was retrieved.",
+        ),
         case("a_url", "See https://aurexis.example/pre-k-opening", NOTHING, []),
         case("a_maps_link", "https://maps.aurexis.example/cairo-campus", NOTHING, []),
         case("an_email", "send your resume to careers@aurexis.example", NOTHING, []),
@@ -346,25 +430,30 @@ YearsAreNotAmountsTests = _suite(
     [
         case("a_bare_year", "Future Leaders Summer Camp 2026", NOTHING, []),
         case("the_opening_year", "running since Sep 2024 (mock)", NOTHING, []),
-        case("an_academic_year_range", "during its opening academic year 2024-2025",
-             NOTHING, []),
+        case("an_academic_year_range", "during its opening academic year 2024-2025", NOTHING, []),
         case("an_academic_year_with_a_slash", "the 2026/2027 academic year", NOTHING, []),
-        case("a_deadline_carrying_a_year", "Payment to be completed by 30 June 2026",
-             NOTHING, []),
+        case("a_deadline_carrying_a_year", "Payment to be completed by 30 June 2026", NOTHING, []),
         case("a_year_in_arabic", "العام الدراسي ٢٠٢٦", NOTHING, []),
-        case("a_year_added_to_an_otherwise_grounded_answer",
-             "The camp runs in summer 2026 and the half-day programme is 2,500 EGP.",
-             CAMP, [],
-             "The realistic shape: everything checkable is grounded and the model has "
-             "added a year the chunk did not carry."),
+        case(
+            "a_year_added_to_an_otherwise_grounded_answer",
+            "The camp runs in summer 2026 and the half-day programme is 2,500 EGP.",
+            CAMP,
+            [],
+            "The realistic shape: everything checkable is grounded and the model has "
+            "added a year the chunk did not carry.",
+        ),
         case("the_bottom_of_the_band", "the building dates from 1900", NOTHING, []),
         case("below_the_band", "the building dates from 1899", NOTHING, ["1899"]),
         case("the_top_of_the_band", "valid until 2099", NOTHING, []),
         case("above_the_band", "valid until 2100", NOTHING, ["2100"]),
-        case("a_grouped_figure_in_the_band_is_still_an_amount",
-             "the fee is 1,950 EGP", NOTHING, ["1950"],
-             "Nobody writes a year as 2,026. Grouping is what keeps a small amount "
-             "checkable while a bare year is not."),
+        case(
+            "a_grouped_figure_in_the_band_is_still_an_amount",
+            "the fee is 1,950 EGP",
+            NOTHING,
+            ["1950"],
+            "Nobody writes a year as 2,026. Grouping is what keeps a small amount "
+            "checkable while a bare year is not.",
+        ),
     ],
 )
 
@@ -379,24 +468,38 @@ ListsAndRangesTests = _suite(
     amounts must stay a list of amounts; a list of small figures must not become one
     large one.""",
     [
-        case("the_instalment_line_verbatim",
-             "Each subsequent payment: 17,600 EGP, 26,400 EGP, 26,400 EGP",
-             INSTALMENTS, []),
-        case("the_instalment_line_without_the_currency",
-             "الدفعات: 17,600، 26,400، 26,400", INSTALMENTS, [],
-             "A model restating the line in Arabic drops EGP from between the figures, "
-             "leaving them separated only by a comma and a space."),
-        case("a_list_that_invents_its_last_member",
-             "الدفعات: 17,600، 26,400، 31,000", INSTALMENTS, ["31000"]),
+        case(
+            "the_instalment_line_verbatim",
+            "Each subsequent payment: 17,600 EGP, 26,400 EGP, 26,400 EGP",
+            INSTALMENTS,
+            [],
+        ),
+        case(
+            "the_instalment_line_without_the_currency",
+            "الدفعات: 17,600، 26,400، 26,400",
+            INSTALMENTS,
+            [],
+            "A model restating the line in Arabic drops EGP from between the figures, "
+            "leaving them separated only by a comma and a space.",
+        ),
+        case(
+            "a_list_that_invents_its_last_member",
+            "الدفعات: 17,600، 26,400، 31,000",
+            INSTALMENTS,
+            ["31000"],
+        ),
         case("a_fee_range", "fees run from 75,000 to 160,000 EGP", FEES, []),
         case("a_fee_range_written_with_a_dash", "fees run 75,000-160,000 EGP", FEES, []),
         case("a_comma_list_of_year_groups", "the test is sat in Years 4, 7, 9", NOTHING, []),
         case("a_comma_list_of_terms", "payable across terms 1, 2, 3", NOTHING, []),
         case("a_comma_list_with_no_spaces", "terms 1,2,3", NOTHING, []),
         case("an_arabic_comma_list", "السنوات ٤، ٧، ٩", NOTHING, []),
-        case("a_bulleted_list_of_amounts",
-             "- Pre-K: 75,000 EGP\n- FS1–FS2: 88,000 EGP\n- Y03–Y05: 105,000 EGP",
-             FEES, []),
+        case(
+            "a_bulleted_list_of_amounts",
+            "- Pre-K: 75,000 EGP\n- FS1–FS2: 88,000 EGP\n- Y03–Y05: 105,000 EGP",
+            FEES,
+            [],
+        ),
     ],
 )
 
@@ -413,31 +516,50 @@ WhateverShapeTheAnswerTakesTests = _suite(
         case("a_one_word_answer", "105,000", FEES, []),
         case("a_one_word_answer_that_is_wrong", "111,000", FEES, ["111000"]),
         case("a_one_sentence_answer", "Year 3 fees are 105,000 EGP per year.", FEES, []),
-        case("a_multi_paragraph_answer",
-             "أهلاً بيك! مصاريف Year 3 هي 105,000 جنيه في السنة للمصريين.\n\n"
-             "لو حابب الكامب الصيفي، النص يوم بـ 2,500 جنيه في الأسبوع والفل داي "
-             "بـ 4,000 جنيه.\n\n"
-             "المصاريف بتتقسط: مقدم 17,600 جنيه وبعدها 26,400 جنيه.",
-             PRICED, []),
-        case("a_markdown_table_answer",
-             "| Grade | Fee |\n|---|---|\n| Pre-K | 75,000 EGP |\n| Y03–Y05 | 105,000 EGP |",
-             FEES, []),
-        case("a_markdown_table_with_one_wrong_row",
-             "| Grade | Fee |\n|---|---|\n| Pre-K | 75,000 EGP |\n| Y03–Y05 | 111,000 EGP |",
-             FEES, ["111000"]),
+        case(
+            "a_multi_paragraph_answer",
+            "أهلاً بيك! مصاريف Year 3 هي 105,000 جنيه في السنة للمصريين.\n\n"
+            "لو حابب الكامب الصيفي، النص يوم بـ 2,500 جنيه في الأسبوع والفل داي "
+            "بـ 4,000 جنيه.\n\n"
+            "المصاريف بتتقسط: مقدم 17,600 جنيه وبعدها 26,400 جنيه.",
+            PRICED,
+            [],
+        ),
+        case(
+            "a_markdown_table_answer",
+            "| Grade | Fee |\n|---|---|\n| Pre-K | 75,000 EGP |\n| Y03–Y05 | 105,000 EGP |",
+            FEES,
+            [],
+        ),
+        case(
+            "a_markdown_table_with_one_wrong_row",
+            "| Grade | Fee |\n|---|---|\n| Pre-K | 75,000 EGP |\n| Y03–Y05 | 111,000 EGP |",
+            FEES,
+            ["111000"],
+        ),
         case("an_answer_in_bold", "The fee is **105,000 EGP** per year.", FEES, []),
-        case("an_answer_with_no_figures_at_all", "نعم، بنوفر باص مدرسي للمناطق المحددة.",
-             FEES, []),
+        case("an_answer_with_no_figures_at_all", "نعم، بنوفر باص مدرسي للمناطق المحددة.", FEES, []),
         case("an_rtl_answer_with_latin_inside", "مصاريف Y03–Y05 هي 105,000 EGP.", FEES, []),
-        case("a_very_long_grounded_answer",
-             ("Y03–Y05 costs 105,000 EGP for Egyptian families. " * 200), FEES, []),
-        case("one_wrong_figure_hidden_in_a_long_answer",
-             ("Y03–Y05 costs 105,000 EGP for Egyptian families. " * 120)
-             + "Y06 costs 111,000 EGP. "
-             + ("Y03–Y05 costs 105,000 EGP for Egyptian families. " * 120),
-             FEES, ["111000"]),
-        case("figures_spread_across_lines",
-             "Pre-K\n75,000\nFS1–FS2\n88,000\nY03–Y05\n105,000", FEES, []),
+        case(
+            "a_very_long_grounded_answer",
+            ("Y03–Y05 costs 105,000 EGP for Egyptian families. " * 200),
+            FEES,
+            [],
+        ),
+        case(
+            "one_wrong_figure_hidden_in_a_long_answer",
+            ("Y03–Y05 costs 105,000 EGP for Egyptian families. " * 120)
+            + "Y06 costs 111,000 EGP. "
+            + ("Y03–Y05 costs 105,000 EGP for Egyptian families. " * 120),
+            FEES,
+            ["111000"],
+        ),
+        case(
+            "figures_spread_across_lines",
+            "Pre-K\n75,000\nFS1–FS2\n88,000\nY03–Y05\n105,000",
+            FEES,
+            [],
+        ),
     ],
 )
 
@@ -459,10 +581,18 @@ DegenerateInputTests = _suite(
         case("a_missing_evidence", "the fee is 105,000 EGP", None, ["105000"]),
         case("an_answer_with_no_digits", "Yes, we do.", FEES, []),
         case("an_evidence_with_no_digits", "105,000", "no figures here at all", ["105000"]),
-        case("several_missing_figures_come_back_sorted",
-             "111,000 then 222,000 then 133,000", FEES, ["111000", "133000", "222000"]),
-        case("a_figure_stated_twice_is_reported_once",
-             "111,000 EGP, yes — 111,000 EGP.", FEES, ["111000"]),
+        case(
+            "several_missing_figures_come_back_sorted",
+            "111,000 then 222,000 then 133,000",
+            FEES,
+            ["111000", "133000", "222000"],
+        ),
+        case(
+            "a_figure_stated_twice_is_reported_once",
+            "111,000 EGP, yes — 111,000 EGP.",
+            FEES,
+            ["111000"],
+        ),
     ],
 )
 
@@ -479,22 +609,30 @@ TheBoundsThemselvesTests = _suite(
         case("two_digits_are_below_the_floor", "99 places", NOTHING, []),
         case("three_digits_reach_it", "999 places", NOTHING, ["999"]),
         case("exactly_one_hundred", "100 places", NOTHING, ["100"]),
-        case("seven_digits_are_an_amount", "the endowment is 1,500,000 EGP", NOTHING,
-             ["1500000"]),
-        case("seven_digits_without_separators", "the endowment is 1500000 EGP", NOTHING,
-             ["1500000"]),
-        case("eight_digits_are_an_identifier", "reference 12,345,678", NOTHING, [],
-             "Past the ceiling nothing is reported, which costs a very large amount its "
-             "check and buys every phone number, IBAN and account number silence."),
+        case("seven_digits_are_an_amount", "the endowment is 1,500,000 EGP", NOTHING, ["1500000"]),
+        case(
+            "seven_digits_without_separators", "the endowment is 1500000 EGP", NOTHING, ["1500000"]
+        ),
+        case(
+            "eight_digits_are_an_identifier",
+            "reference 12,345,678",
+            NOTHING,
+            [],
+            "Past the ceiling nothing is reported, which costs a very large amount its "
+            "check and buys every phone number, IBAN and account number silence.",
+        ),
         case("eight_digits_without_separators", "reference 12345678", NOTHING, []),
         case("leading_zeros_are_part_of_the_token", "room 007", NOTHING, ["007"]),
         case("all_zeros", "code 000", NOTHING, ["000"]),
         case("the_largest_amount_the_corpus_states", "Y11–Y12 is 160,000 EGP", FEES, []),
-        case("one_order_of_magnitude_above_it", "Y11–Y12 is 1,600,000 EGP", FEES,
-             ["1600000"]),
-        case("a_figure_is_never_satisfied_by_a_substring_of_another",
-             "105 students", "the fee is 105,000", ["105"],
-             "Whole tokens. The substring match is what let 45 be satisfied by 07:45."),
+        case("one_order_of_magnitude_above_it", "Y11–Y12 is 1,600,000 EGP", FEES, ["1600000"]),
+        case(
+            "a_figure_is_never_satisfied_by_a_substring_of_another",
+            "105 students",
+            "the fee is 105,000",
+            ["105"],
+            "Whole tokens. The substring match is what let 45 be satisfied by 07:45.",
+        ),
     ],
 )
 
@@ -510,17 +648,27 @@ TheFalsePositivesItCannotAvoidTests = _suite(
     these are the reason the shipped mode is `observe` and not `enforce`, and the rate
     a deployment has to read before it changes that.""",
     [
-        case("a_sum_of_two_rows", "two children in Y03 come to 210,000 EGP", FEES,
-             ["210000"]),
-        case("a_discount_applied",
-             "with the 7% sibling discount that is 97,650 EGP",
-             "\n".join((FEES, DISCOUNTS)), ["97650"]),
+        case("a_sum_of_two_rows", "two children in Y03 come to 210,000 EGP", FEES, ["210000"]),
+        case(
+            "a_discount_applied",
+            "with the 7% sibling discount that is 97,650 EGP",
+            "\n".join((FEES, DISCOUNTS)),
+            ["97650"],
+        ),
         case("a_term_share_computed", "40% of 105,000 is 42,000 EGP", FEES, ["42000"]),
-        case("a_difference_between_tiers",
-             "the international tier costs 10,000 EGP more", FEES, ["10000"]),
+        case(
+            "a_difference_between_tiers",
+            "the international tier costs 10,000 EGP more",
+            FEES,
+            ["10000"],
+        ),
         case("a_monthly_figure", "105,000 EGP is about 8,750 EGP a month", FEES, ["8750"]),
-        case("a_total_of_the_instalments",
-             "three payments of 26,400 come to 79,200 EGP", INSTALMENTS, ["79200"]),
+        case(
+            "a_total_of_the_instalments",
+            "three payments of 26,400 come to 79,200 EGP",
+            INSTALMENTS,
+            ["79200"],
+        ),
     ],
 )
 
@@ -528,6 +676,7 @@ TheFalsePositivesItCannotAvoidTests = _suite(
 # --------------------------------------------------------------------------------------
 # What it reports and what it replaces
 # --------------------------------------------------------------------------------------
+
 
 class WhatItReportsAndWhatItReplacesTests(unittest.TestCase):
     """The check's contract with the turn: which turns it looks at, and what it returns."""
@@ -543,7 +692,7 @@ class WhatItReportsAndWhatItReplacesTests(unittest.TestCase):
         return {"retrieved_chunks": [{"text": t} for t in texts]}
 
     def _run(self, mode, answer, trace, plan=None):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         with patch.object(get_profile().agent, "answer_figures_mode", mode):
             return enforce_answer_figures(
@@ -554,36 +703,27 @@ class WhatItReportsAndWhatItReplacesTests(unittest.TestCase):
         """The shipped default. It cannot tell an invented figure from a derived one, so
         a deployment reads its own false-positive rate before it lets this replace
         anything."""
-        self.assertEqual(
-            "", self._run("observe", "the fee is 88,000 EGP", self._trace(FEES))
-        )
+        self.assertEqual("", self._run("observe", "the fee is 88,000 EGP", self._trace(FEES)))
 
     def test_enforce_replaces_the_answer(self):
-        self.assertTrue(
-            self._run("enforce", "the fee is 111,000 EGP", self._trace(FEES))
-        )
+        self.assertTrue(self._run("enforce", "the fee is 111,000 EGP", self._trace(FEES)))
 
     def test_enforce_serves_the_profiles_own_copy(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         replacement = self._run("enforce", "the fee is 111,000 EGP", self._trace(FEES))
         self.assertEqual(get_profile().user_copy.unverified_answer, replacement)
 
     def test_a_grounded_answer_is_never_replaced(self):
-        self.assertEqual(
-            "", self._run("enforce", "the fee is 105,000 EGP", self._trace(FEES))
-        )
+        self.assertEqual("", self._run("enforce", "the fee is 105,000 EGP", self._trace(FEES)))
 
     def test_off_does_nothing_at_all(self):
-        self.assertEqual(
-            "", self._run("off", "the fee is 111,000 EGP", self._trace(FEES))
-        )
+        self.assertEqual("", self._run("off", "the fee is 111,000 EGP", self._trace(FEES)))
 
     def test_evidence_is_every_chunk_the_turn_retrieved(self):
         """A figure grounded by the third chunk is grounded."""
         self.assertEqual(
-            "", self._run("enforce", "the fee is 2,500 EGP",
-                          self._trace(CONTACT, CALENDAR, CAMP))
+            "", self._run("enforce", "the fee is 2,500 EGP", self._trace(CONTACT, CALENDAR, CAMP))
         )
 
     def test_a_turn_that_retrieved_nothing_is_not_checked(self):
@@ -598,7 +738,7 @@ class WhatItReportsAndWhatItReplacesTests(unittest.TestCase):
         self.assertEqual("", self._run("enforce", "the fee is 111,000 EGP", None))
 
     def test_a_turn_with_no_plan_is_not_checked(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         with patch.object(get_profile().agent, "answer_figures_mode", "enforce"):
             self.assertEqual(
@@ -621,24 +761,22 @@ class WhatItReportsAndWhatItReplacesTests(unittest.TestCase):
 
     def test_a_chunk_without_text_does_not_raise(self):
         self.assertEqual(
-            "", self._run("observe", "the fee is 111,000 EGP",
-                          {"retrieved_chunks": [{"score": 0.9}]})
+            "",
+            self._run("observe", "the fee is 111,000 EGP", {"retrieved_chunks": [{"score": 0.9}]}),
         )
 
     def test_a_chunk_whose_text_is_not_a_string_does_not_raise(self):
         self.assertEqual(
-            "", self._run("enforce", "the fee is 105000 EGP",
-                          {"retrieved_chunks": [{"text": 105000}]})
+            "",
+            self._run("enforce", "the fee is 105000 EGP", {"retrieved_chunks": [{"text": 105000}]}),
         )
 
     def test_an_unknown_mode_observes_rather_than_enforces(self):
         """A profile typo must not start withdrawing answers."""
-        self.assertEqual(
-            "", self._run("watch", "the fee is 111,000 EGP", self._trace(FEES))
-        )
+        self.assertEqual("", self._run("watch", "the fee is 111,000 EGP", self._trace(FEES)))
 
     def test_the_shipped_default_observes(self):
-        from backend.agent.profiles.registry import load_profile
+        from backend.profiles.registry import load_profile
 
         self.assertEqual("observe", load_profile("school").agent.answer_figures_mode)
 

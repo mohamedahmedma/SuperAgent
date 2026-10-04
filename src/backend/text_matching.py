@@ -64,6 +64,7 @@ So: `MilvusStore.drop_collection()` and re-ingest. Until that happens the dense 
 carries retrieval on its own, which is what it was already doing for Arabic — nothing
 gets worse in the meantime, it just does not get better.
 """
+
 from __future__ import annotations
 
 import re
@@ -157,15 +158,65 @@ _MIN_LETTERS_AFTER_PLURAL = 3
 # added to either is worth a moment's thought about the other.
 _ARABIC_STOP_WORDS_NATURAL = [
     # interrogatives, MSA and Egyptian
-    "ما", "ماذا", "مين", "من", "هل", "كيف", "ازاي", "ايه", "متى", "امتى",
-    "اين", "فين", "كم", "كام", "لماذا", "ليه",
+    "ما",
+    "ماذا",
+    "مين",
+    "من",
+    "هل",
+    "كيف",
+    "ازاي",
+    "ايه",
+    "متى",
+    "امتى",
+    "اين",
+    "فين",
+    "كم",
+    "كام",
+    "لماذا",
+    "ليه",
     # pronouns, prepositions, particles
-    "انا", "انت", "هو", "هي", "احنا", "نحن", "هم", "في", "الى", "عن", "مع",
-    "عند", "بين", "بعد", "قبل", "لكن", "او", "ثم", "قد", "لقد",
-    "هذا", "هذه", "ذلك", "التي", "الذي", "كل", "بعض",
+    "انا",
+    "انت",
+    "هو",
+    "هي",
+    "احنا",
+    "نحن",
+    "هم",
+    "في",
+    "الى",
+    "عن",
+    "مع",
+    "عند",
+    "بين",
+    "بعد",
+    "قبل",
+    "لكن",
+    "او",
+    "ثم",
+    "قد",
+    "لقد",
+    "هذا",
+    "هذه",
+    "ذلك",
+    "التي",
+    "الذي",
+    "كل",
+    "بعض",
     # conversational filler that opens a question without narrowing it
-    "عايز", "عاوز", "ممكن", "لو", "سمحت", "اريد", "احتاج",
-    "يا", "بس", "طيب", "تمام", "شكرا", "رجاء", "فضلك",
+    "عايز",
+    "عاوز",
+    "ممكن",
+    "لو",
+    "سمحت",
+    "اريد",
+    "احتاج",
+    "يا",
+    "بس",
+    "طيب",
+    "تمام",
+    "شكرا",
+    "رجاء",
+    "فضلك",
 ]
 
 

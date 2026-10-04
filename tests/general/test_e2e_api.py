@@ -15,6 +15,7 @@ The server starts once for the module. Booting it loads bge-m3, which is the slo
 thing here by a wide margin, and doing that per test class would trade minutes for
 nothing.
 """
+
 from __future__ import annotations
 
 import json
@@ -81,8 +82,9 @@ def setUpModule():
 
     port = _free_port()
     _BASE = f"http://127.0.0.1:{port}"
-    config = uvicorn.Config(create_app(), host="127.0.0.1", port=port,
-                            log_level="error", access_log=False)
+    config = uvicorn.Config(
+        create_app(), host="127.0.0.1", port=port, log_level="error", access_log=False
+    )
     _SERVER = uvicorn.Server(config)
     _THREAD = threading.Thread(target=_SERVER.run, daemon=True)
     _THREAD.start()
@@ -141,16 +143,15 @@ def _start_identity():
     # database URL set above is the one this server actually opens.
     reset_engine()
     _SAVED_IDENTITY_KEY = os.environ.get("IDENTITY_PUBLIC_KEY_PEM")
-    os.environ["IDENTITY_PUBLIC_KEY_PEM"] = signing_key_from(
-        identity_settings()
-    ).public_pem
+    os.environ["IDENTITY_PUBLIC_KEY_PEM"] = signing_key_from(identity_settings()).public_pem
 
     from identity.app import app as identity_app
 
     port = _free_port()
     _IDENTITY_BASE = f"http://127.0.0.1:{port}"
-    config = uvicorn.Config(identity_app, host="127.0.0.1", port=port,
-                            log_level="error", access_log=False)
+    config = uvicorn.Config(
+        identity_app, host="127.0.0.1", port=port, log_level="error", access_log=False
+    )
     _IDENTITY_SERVER = uvicorn.Server(config)
     _IDENTITY_THREAD = threading.Thread(target=_IDENTITY_SERVER.run, daemon=True)
     _IDENTITY_THREAD.start()
@@ -264,11 +265,13 @@ class ProbeTests(unittest.TestCase):
 
     def test_ready_becomes_true_once_the_embedder_is_warm(self):
         """Startup calls warm_up, so a live server should reach ready."""
+
         def ready():
             return requests.get(url("/ready"), timeout=10).status_code == 200
 
-        self.assertTrue(wait_until(ready, timeout=300, interval=0.5),
-                        "the server never became ready")
+        self.assertTrue(
+            wait_until(ready, timeout=300, interval=0.5), "the server never became ready"
+        )
 
     def test_ready_names_each_dependency(self):
         body = requests.get(url("/ready"), timeout=30).json()
@@ -313,9 +316,12 @@ class RoutingTests(unittest.TestCase):
         for removed in ("/auth/login", "/auth/register", "/auth/me"):
             self.assertNotIn(removed, paths)
 
-        self.assertEqual(404, requests.post(
-            url("/auth/login"), json={"username": "x", "password": "y"}, timeout=15
-        ).status_code)
+        self.assertEqual(
+            404,
+            requests.post(
+                url("/auth/login"), json={"username": "x", "password": "y"}, timeout=15
+            ).status_code,
+        )
 
 
 class CorsTests(unittest.TestCase):
@@ -324,18 +330,17 @@ class CorsTests(unittest.TestCase):
     def test_a_permitted_origin_is_echoed_on_a_preflight(self):
         response = requests.options(
             url("/chat"),
-            headers={"Origin": "https://ui.example.com",
-                     "Access-Control-Request-Method": "POST"},
+            headers={"Origin": "https://ui.example.com", "Access-Control-Request-Method": "POST"},
             timeout=10,
         )
-        self.assertEqual("https://ui.example.com",
-                         response.headers.get("access-control-allow-origin"))
+        self.assertEqual(
+            "https://ui.example.com", response.headers.get("access-control-allow-origin")
+        )
 
     def test_an_unlisted_origin_is_not_echoed(self):
         response = requests.options(
             url("/chat"),
-            headers={"Origin": "https://evil.example.com",
-                     "Access-Control-Request-Method": "POST"},
+            headers={"Origin": "https://evil.example.com", "Access-Control-Request-Method": "POST"},
             timeout=10,
         )
         self.assertIsNone(response.headers.get("access-control-allow-origin"))
@@ -345,13 +350,11 @@ class CorsTests(unittest.TestCase):
         both is strictly worse than either."""
         response = requests.options(
             url("/chat"),
-            headers={"Origin": "https://ui.example.com",
-                     "Access-Control-Request-Method": "POST"},
+            headers={"Origin": "https://ui.example.com", "Access-Control-Request-Method": "POST"},
             timeout=10,
         )
         if response.headers.get("access-control-allow-origin") == "*":
-            self.assertNotEqual("true",
-                                response.headers.get("access-control-allow-credentials"))
+            self.assertNotEqual("true", response.headers.get("access-control-allow-credentials"))
 
     def test_etag_is_exposed_so_a_remote_ui_can_revalidate(self):
         response = requests.get(
@@ -396,8 +399,9 @@ class AuthTests(unittest.TestCase):
         """
         with temporary_user() as (username, password):
             registered = register(username, password)
-            self.assertIn(registered.status_code, (200, 201),
-                          f"register failed: {registered.text[:300]}")
+            self.assertIn(
+                registered.status_code, (200, 201), f"register failed: {registered.text[:300]}"
+            )
 
             signed_in = login(username, password)
             self.assertEqual(200, signed_in.status_code, signed_in.text[:300])
@@ -470,8 +474,9 @@ class ValidationTests(unittest.TestCase):
                     json={"username": value, "password": value},
                     timeout=30,
                 )
-                self.assertLess(response.status_code, 500,
-                                f"a 5xx on hostile input: {response.text[:200]}")
+                self.assertLess(
+                    response.status_code, 500, f"a 5xx on hostile input: {response.text[:200]}"
+                )
 
     def test_the_accounts_table_survived_that(self):
         self.assertEqual(200, requests.get(identity_url("/health"), timeout=10).status_code)
@@ -612,7 +617,8 @@ class IdentityBackendIntegrationTests(unittest.TestCase):
             )
 
         self.assertEqual(
-            200, response.status_code,
+            200,
+            response.status_code,
             f"the backend rejected a token identity had just minted: {response.text[:300]}",
         )
 
@@ -630,7 +636,8 @@ class IdentityBackendIntegrationTests(unittest.TestCase):
         )
 
         self.assertNotIn(
-            response.status_code, (401, 403),
+            response.status_code,
+            (401, 403),
             f"the admin role did not survive the trip between services: {response.text[:300]}",
         )
 
@@ -841,9 +848,8 @@ class IdentityBackendIntegrationTests(unittest.TestCase):
         """
         from unittest.mock import patch
 
-        import schoolauth.verification as verification
-
         import backend.infra.identity as backend_identity
+        import schoolauth.verification as verification
 
         with temporary_user() as (username, password):
             register(username, password)
@@ -872,7 +878,8 @@ class IdentityBackendIntegrationTests(unittest.TestCase):
                 )
 
         self.assertEqual(
-            200, response.status_code,
+            200,
+            response.status_code,
             f"an identity outage took the backend down with it: {response.text[:300]}",
         )
 
@@ -903,7 +910,8 @@ class IdentityBackendIntegrationTests(unittest.TestCase):
                 schoolauth.reset_key_cache()
 
         self.assertIn(
-            response.status_code, (401, 503),
+            response.status_code,
+            (401, 503),
             f"unverifiable identity was not refused: {response.text[:300]}",
         )
 
@@ -928,8 +936,7 @@ class LiveChatTests(unittest.TestCase):
         headers = self.authenticated()
         response = requests.post(
             url("/chat"),
-            json={"message": "what are the school fees?",
-                  "session_id": f"{TEST_PREFIX}-chat-1"},
+            json={"message": "what are the school fees?", "session_id": f"{TEST_PREFIX}-chat-1"},
             headers=headers,
             timeout=180,
         )
@@ -943,8 +950,7 @@ class LiveChatTests(unittest.TestCase):
         headers = self.authenticated()
         response = requests.post(
             url("/chat"),
-            json={"message": "ما هي الرسوم الدراسية؟",
-                  "session_id": f"{TEST_PREFIX}-chat-ar"},
+            json={"message": "ما هي الرسوم الدراسية؟", "session_id": f"{TEST_PREFIX}-chat-ar"},
             headers=headers,
             timeout=180,
         )
@@ -956,8 +962,10 @@ class LiveChatTests(unittest.TestCase):
         headers = self.authenticated()
         response = requests.post(
             url("/chat/stream"),
-            json={"message": "when does the second term start?",
-                  "session_id": f"{TEST_PREFIX}-stream-1"},
+            json={
+                "message": "when does the second term start?",
+                "session_id": f"{TEST_PREFIX}-stream-1",
+            },
             headers=headers,
             timeout=180,
             stream=True,
@@ -997,8 +1005,10 @@ class LiveChatTests(unittest.TestCase):
             start = time.time()
             response = requests.post(
                 url("/chat"),
-                json={"message": "what are the admission requirements?",
-                      "session_id": f"{TEST_PREFIX}-conc-{index}"},
+                json={
+                    "message": "what are the admission requirements?",
+                    "session_id": f"{TEST_PREFIX}-conc-{index}",
+                },
                 headers=headers[index],
                 timeout=300,
             )
@@ -1025,7 +1035,8 @@ class LiveChatTests(unittest.TestCase):
             self.assertEqual(200, code)
         slowest = max(duration for _, duration in outcomes)
         self.assertLess(
-            wall, slowest * 1.8,
+            wall,
+            slowest * 1.8,
             f"two turns took {wall:.1f}s but the slowest alone was {slowest:.1f}s — "
             "they appear to have serialised",
         )

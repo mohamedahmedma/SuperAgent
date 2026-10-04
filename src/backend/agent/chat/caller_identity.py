@@ -22,6 +22,7 @@ The token deserves particular care: it is a live bearer credential for another
 service. The generated `__repr__` is overridden so it cannot reach a log line, a
 traceback, or a captured test failure, and `close()` on the context drops it.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace

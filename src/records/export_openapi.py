@@ -7,6 +7,7 @@ is written against and the thing an integrator reads, so a change to it should s
 as a reviewable diff rather than as a surprise at runtime. Regenerate it whenever a
 route or schema changes.
 """
+
 import json
 import pathlib
 

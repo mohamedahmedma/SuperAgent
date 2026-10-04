@@ -37,6 +37,7 @@ Nothing here exposes a teacher's email, phone, username or user id. The response
 the privacy boundary rather than a filter someone has to remember downstream, which is why
 it is a lean shape of its own and never `TeacherOut`.
 """
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -115,9 +116,7 @@ class StudentClassroomOut(BaseModel):
         "family has no reason to see.",
     )
     class_name_en: str | None = None
-    year_level_code: str | None = Field(
-        default=None, description="The rung the room sits on."
-    )
+    year_level_code: str | None = Field(default=None, description="The rung the room sits on.")
     year_level_name_ar: str | None = Field(
         default=None,
         description="The rung's human name — `Year 3`. `null` only when the school's "
@@ -149,9 +148,7 @@ class StudentClassroomOut(BaseModel):
     def of(cls, room: StudentClassroom) -> "StudentClassroomOut":
         section = room.class_section
         if section is None:
-            return cls(
-                student_number=room.student_number, term_code=room.term_code
-            )
+            return cls(student_number=room.student_number, term_code=room.term_code)
         level = room.year_level
         return cls(
             student_number=room.student_number,

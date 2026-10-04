@@ -10,6 +10,7 @@ convenience claim described below, no permissions and no profile. Those are auth
 decisions and they belong to the service that owns the data, resolved fresh on every
 request. **A permission baked into a token is a permission that survives being revoked.**
 """
+
 from __future__ import annotations
 
 import uuid

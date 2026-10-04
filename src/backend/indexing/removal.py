@@ -10,6 +10,7 @@ It was `api.resources.delete_document_transactionally`, a module function over o
 built at import. The behaviour is unchanged; what moved is where its collaborators come
 from.
 """
+
 from __future__ import annotations
 
 import logging
@@ -46,7 +47,7 @@ class DocumentRemover:
     def _current_profile(self):
         if self._profile is not None:
             return self._profile()
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         return get_profile()
 
@@ -83,7 +84,9 @@ class DocumentRemover:
         and an anchor stored in an older answer resolved to the wrong picture.
         """
         if job_manager and job_id:
-            job_manager.update_step(job_id, "prepare", 50, "running", "Initializing Milvus collection")
+            job_manager.update_step(
+                job_id, "prepare", 50, "running", "Initializing Milvus collection"
+            )
 
         self._milvus.init_collection()
         delete_expr = f'filename == "{filename}"'
@@ -91,11 +94,19 @@ class DocumentRemover:
         if job_manager and job_id:
             job_manager.complete_step(job_id, "prepare", "Preparation complete")
             # Kept for compatibility with the existing frontend deletion steps
-            job_manager.update_step(job_id, "bm25", 100, "completed", "BM25 full-text search statistics synced automatically (maintained server-side by Milvus)")
+            job_manager.update_step(
+                job_id,
+                "bm25",
+                100,
+                "completed",
+                "BM25 full-text search statistics synced automatically (maintained server-side by Milvus)",
+            )
 
         # Delete Milvus vectors
         if job_manager and job_id:
-            job_manager.update_step(job_id, "milvus", 20, "running", "Physically deleting vector chunks in Milvus")
+            job_manager.update_step(
+                job_id, "milvus", 20, "running", "Physically deleting vector chunks in Milvus"
+            )
 
         chunks_deleted = 0
         try:
@@ -105,16 +116,26 @@ class DocumentRemover:
             raise RuntimeError(f"Failed to delete Milvus vectors: {str(e)}") from e
 
         if job_manager and job_id:
-            job_manager.complete_step(job_id, "milvus", f"Vector data cleanup complete, {chunks_deleted} records deleted")
+            job_manager.complete_step(
+                job_id, "milvus", f"Vector data cleanup complete, {chunks_deleted} records deleted"
+            )
 
         # Delete ParentChunk rows in Postgres and the Redis cache
         if job_manager and job_id:
-            job_manager.update_step(job_id, "parent_store", 20, "running", "Cleaning up parent chunks in the PostgreSQL database and Redis")
+            job_manager.update_step(
+                job_id,
+                "parent_store",
+                20,
+                "running",
+                "Cleaning up parent chunks in the PostgreSQL database and Redis",
+            )
 
         try:
             self._parent_chunks.delete_by_filename(filename)
         except Exception as e:
-            raise RuntimeError(f"Failed to clean up PostgreSQL parent chunks and cache: {str(e)}") from e
+            raise RuntimeError(
+                f"Failed to clean up PostgreSQL parent chunks and cache: {str(e)}"
+            ) from e
 
         # Asset occurrences and their orphaned blobs. Reported inside the existing
         # parent_store step rather than as a new one, so the delete job's step contract

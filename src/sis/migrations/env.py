@@ -24,6 +24,7 @@ autogenerate against `None` with a clear `CommandError`, whereas an empty metada
 valid comparison target describing a database with no tables, so `--autogenerate` would
 cheerfully emit a migration that drops every table in the school's SIS.
 """
+
 from __future__ import annotations
 
 import logging

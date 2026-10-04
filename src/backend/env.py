@@ -7,9 +7,10 @@ routinely contain `FOO=` for a value someone meant to disable, and the bare
 `os.getenv(name, default)` form returns `""` in that case rather than the default —
 which then either crashes (`int("")`) or, worse, silently evaluates to the wrong
 branch. These readers also keep the modules consistent with
-backend/agent/profiles/registry.py, which applies the same blank-is-unset rule when
+backend/profiles/registry.py, which applies the same blank-is-unset rule when
 overlaying env onto a profile.
 """
+
 import logging
 import os
 from datetime import timezone, tzinfo
@@ -163,7 +164,9 @@ def school_timezone() -> tzinfo:
     try:
         return ZoneInfo(name)
     except Exception:
-        logger.warning("unknown SCHOOL_TIMEZONE %r — falling back to %s", name, SCHOOL_TIMEZONE_DEFAULT)
+        logger.warning(
+            "unknown SCHOOL_TIMEZONE %r — falling back to %s", name, SCHOOL_TIMEZONE_DEFAULT
+        )
     try:
         return ZoneInfo(SCHOOL_TIMEZONE_DEFAULT)
     except Exception:  # pragma: no cover - a system with no tz database

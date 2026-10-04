@@ -11,6 +11,7 @@ time they sign in it becomes PBKDF2 without them noticing. A migration that forc
 password reset on every family would have been abandoned halfway and left the old auth
 running forever.
 """
+
 from __future__ import annotations
 
 import base64
@@ -50,9 +51,7 @@ class Pbkdf2PasswordHasher:
         if not password:
             raise ValueError("password is required")
         salt = os.urandom(16)
-        digest = hashlib.pbkdf2_hmac(
-            "sha256", password.encode("utf-8"), salt, self._rounds
-        )
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, self._rounds)
         return (
             f"{PBKDF2_PREFIX}{self._rounds}$"
             f"{base64.b64encode(salt).decode('ascii')}$"
@@ -110,9 +109,7 @@ class Pbkdf2PasswordHasher:
                 base64.b64decode(salt_b64.encode("ascii")),
                 int(rounds),
             )
-            return hmac.compare_digest(
-                calculated, base64.b64decode(digest_b64.encode("ascii"))
-            )
+            return hmac.compare_digest(calculated, base64.b64decode(digest_b64.encode("ascii")))
         except Exception:
             return False
 
@@ -173,9 +170,7 @@ def _verify_bcrypt(password: str, password_hash: str) -> bool:
         # bcrypt has always used only the first 72 bytes; version 5 raises instead of
         # truncating. Truncating here reproduces what the library did when the stored hash
         # was created, which is what makes the comparison valid.
-        return _bcrypt.checkpw(
-            password.encode("utf-8")[:72], password_hash.encode("utf-8")
-        )
+        return _bcrypt.checkpw(password.encode("utf-8")[:72], password_hash.encode("utf-8"))
     except Exception as exc:
         logger.warning("Legacy bcrypt verification failed: %s", exc)
         return False

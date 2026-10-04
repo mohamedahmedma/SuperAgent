@@ -13,13 +13,14 @@ turn ends in an answer. These tests assert on what the model is OFFERED, because
 the mechanism — asserting on the count alone would pass just as well for the refusing
 version that caused the problem.
 """
+
 import os
 import unittest
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from backend.agent.chat import runtime
-from backend.agent.profiles import load_profile, registry, set_profile
+from backend.profiles import load_profile, registry, set_profile
 
 
 class _Request:
@@ -105,18 +106,28 @@ class TheCountLivesInGraphState(ProfileScopedTest):
         return middleware.after_model({**state, "messages": [message]}, None)
 
     def test_a_call_is_counted_against_the_tool_that_made_it(self):
-        update = self._count({}, AIMessage(content="", tool_calls=[
-            {"name": "search_knowledge_base", "args": {}, "id": "c1"}]))
+        update = self._count(
+            {},
+            AIMessage(
+                content="", tool_calls=[{"name": "search_knowledge_base", "args": {}, "id": "c1"}]
+            ),
+        )
         self.assertEqual(update, {"tool_calls_made": {"search_knowledge_base": 1}})
 
     def test_counts_accumulate_across_model_steps(self):
         update = self._count(
             {"tool_calls_made": {"search_knowledge_base": 1}},
-            AIMessage(content="", tool_calls=[
-                {"name": "search_knowledge_base", "args": {}, "id": "c2"},
-                {"name": "get_student_grades", "args": {}, "id": "c3"}]))
-        self.assertEqual(update["tool_calls_made"],
-                         {"search_knowledge_base": 2, "get_student_grades": 1})
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "search_knowledge_base", "args": {}, "id": "c2"},
+                    {"name": "get_student_grades", "args": {}, "id": "c3"},
+                ],
+            ),
+        )
+        self.assertEqual(
+            update["tool_calls_made"], {"search_knowledge_base": 2, "get_student_grades": 1}
+        )
 
     def test_a_message_with_no_tool_call_changes_nothing(self):
         self.assertIsNone(self._count({}, AIMessage(content="رسوم الصف الأول 30,000 جنيه.")))
@@ -124,8 +135,7 @@ class TheCountLivesInGraphState(ProfileScopedTest):
 
 class ASpentToolIsNotOffered(ProfileScopedTest):
     def test_everything_is_offered_before_anything_is_spent(self):
-        self.assertEqual(_offered({})["tools"],
-                         ["search_knowledge_base", "get_student_grades"])
+        self.assertEqual(_offered({})["tools"], ["search_knowledge_base", "get_student_grades"])
 
     def test_the_tool_survives_up_to_its_budget(self):
         offered = _offered({"tool_calls_made": {"search_knowledge_base": 1}})["tools"]
@@ -151,8 +161,7 @@ class ASpentToolIsNotOffered(ProfileScopedTest):
     def test_forcing_a_tool_call_is_dropped_when_none_are_left(self):
         """A request that requires a tool call and offers none is rejected by the
         provider before the model ever sees it."""
-        seen = _offered({"tool_calls_made":
-                         {"search_knowledge_base": 2, "get_student_grades": 4}})
+        seen = _offered({"tool_calls_made": {"search_knowledge_base": 2, "get_student_grades": 4}})
         self.assertEqual(seen["tools"], [])
         self.assertIsNone(seen["tool_choice"])
 
@@ -172,7 +181,7 @@ class TheBudgetsMustFitTheStepLimit(ProfileScopedTest):
     """
 
     def test_every_shipped_profile_can_afford_its_own_budgets(self):
-        from backend.agent.profiles import available_profiles
+        from backend.profiles import available_profiles
 
         for name in available_profiles():
             with self.subTest(profile=name):
@@ -183,19 +192,25 @@ class TheBudgetsMustFitTheStepLimit(ProfileScopedTest):
     def test_a_budget_the_graph_cannot_spend_is_refused_at_load(self):
         """Caught when the profile loads rather than on the one question that needed the
         last call — which is where it was found the first time."""
-        from backend.agent.profiles.schema import AgentConfig
+        from backend.profiles.schema import AgentConfig
 
         with self.assertRaises(Exception) as raised:
-            AgentConfig(tools=["search_knowledge_base", "get_student_grades"],
-                        recursion_limit=8,
-                        tool_call_budgets={"get_student_grades": 4},
-                        max_knowledge_calls_per_turn=2)
+            AgentConfig(
+                tools=["search_knowledge_base", "get_student_grades"],
+                recursion_limit=8,
+                tool_call_budgets={"get_student_grades": 4},
+                max_knowledge_calls_per_turn=2,
+            )
         self.assertIn("recursion_limit", str(raised.exception))
 
     def test_the_resolver_on_the_config_agrees_with_the_one_in_runtime(self):
         """Two implementations of one rule is one implementation and one bug waiting."""
         agent = load_profile("school").agent
-        for name in ("search_knowledge_base", "get_student_grades", "a_tool_nobody_has_written_yet"):
+        for name in (
+            "search_knowledge_base",
+            "get_student_grades",
+            "a_tool_nobody_has_written_yet",
+        ):
             with self.subTest(tool=name):
                 self.assertEqual(agent.budget_for_tool(name), runtime.budget_for(name))
 
@@ -208,8 +223,10 @@ class TheMiddlewareIsWiredIn(ProfileScopedTest):
 
         source = inspect.getsource(runtime.create_agent_for_request)
         self.assertIn("_spend_tool_budgets(ctx)", source)
-        self.assertLess(source.index("_collapse_duplicate_tool_calls(ctx)"),
-                        source.index("_spend_tool_budgets(ctx)"))
+        self.assertLess(
+            source.index("_collapse_duplicate_tool_calls(ctx)"),
+            source.index("_spend_tool_budgets(ctx)"),
+        )
 
 
 if __name__ == "__main__":

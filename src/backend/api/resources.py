@@ -8,10 +8,11 @@ a chunk store into every process that touched the API. They are built by
 
 What remains needs no collaborator: two paths and two questions about a filename.
 """
+
 import os
 from pathlib import Path
 
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 # BASE_DIR is the package itself; data/ sits at the repository root, which is now two

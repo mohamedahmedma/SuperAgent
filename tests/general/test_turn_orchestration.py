@@ -6,20 +6,21 @@ absence: the agent was never built, the tool list was shorter, no model was call
 Its whole risk is the same thing, so the rest pin that it degrades to today's
 behaviour whenever anything is uncertain or broken.
 """
+
 import asyncio
 import json
 import unittest
 from unittest.mock import patch
 
+from backend.agent.chat.answer_checks import terminal_reply
 from backend.agent.chat.orchestrator import plan_turn
 from backend.agent.chat.signals import RequestSignals, Scope
 from backend.agent.chat.turn_policy import TurnPlan
-from backend.composition import Services
-from backend.agent.profiles import get_profile
-from backend.agent.profiles.registry import load_profile, set_profile
 from backend.agent.rag.evidence import Certainty
 from backend.agent.tools import KNOWLEDGE_TOOL
-from backend.agent.chat.answer_checks import terminal_reply
+from backend.composition import Services
+from backend.profiles import get_profile
+from backend.profiles.registry import load_profile, set_profile
 
 
 class ForgetfulStorage:
@@ -55,8 +56,15 @@ class RecordingContext:
     # Mirrors ChatRequestContext.note_turn_plan. It has to: the orchestrator swallows
     # any exception from this call ("a hint must never break a turn"), so a double whose
     # signature lags the real one does not fail — it silently records nothing.
-    def note_turn_plan(self, retrieval_sections, scope_options, *,
-                       carried_constraints=(), is_followup=False, language=""):
+    def note_turn_plan(
+        self,
+        retrieval_sections,
+        scope_options,
+        *,
+        carried_constraints=(),
+        is_followup=False,
+        language="",
+    ):
         self.retrieval_sections = list(retrieval_sections or [])
         self.scope_options = list(scope_options or [])
         self.carried_constraints = list(carried_constraints or [])
@@ -73,11 +81,14 @@ def temp_profile(**agent_overrides):
     """
     profile = load_profile("base")
     agent = {"request_envelope_enabled": False, **agent_overrides}
-    return profile.model_copy(update={
-        "agent": profile.agent.model_copy(update=agent),
-        "rag": profile.rag.model_copy(update={"scope_index_enabled": False,
-                                              "domain_gate_enabled": False}),
-    })
+    return profile.model_copy(
+        update={
+            "agent": profile.agent.model_copy(update=agent),
+            "rag": profile.rag.model_copy(
+                update={"scope_index_enabled": False, "domain_gate_enabled": False}
+            ),
+        }
+    )
 
 
 class ActiveProfile:
@@ -128,7 +139,9 @@ class PlanTurnTests(unittest.TestCase):
         self.assertFalse(plan.short_circuit)
 
     def test_a_planner_failure_never_costs_the_turn(self):
-        with patch("backend.agent.chat.orchestrator.build_ladder", side_effect=RuntimeError("boom")):
+        with patch(
+            "backend.agent.chat.orchestrator.build_ladder", side_effect=RuntimeError("boom")
+        ):
             plan, _ = plan_turn("what are the fees", [], None)
         self.assertFalse(plan.short_circuit)
         self.assertIsNone(plan.exposed_tools)
@@ -182,9 +195,11 @@ class ServiceWiringTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("the agent must not be built on a short-circuited turn")
 
         chunks = []
-        with patch.object(service, "plan_turn", lambda *a, **k: (plan, signals or RequestSignals())), \
-             patch.object(service, "create_agent_for_request", spy_create_agent), \
-             patch.object(service, "generate_session_title", lambda _t: "T"):
+        with (
+            patch.object(service, "plan_turn", lambda *a, **k: (plan, signals or RequestSignals())),
+            patch.object(service, "create_agent_for_request", spy_create_agent),
+            patch.object(service, "generate_session_title", lambda _t: "T"),
+        ):
             async for chunk in service.chat_with_agent_stream(
                 "what is the weather", "u", "s", services=_forgetful()
             ):
@@ -200,8 +215,9 @@ class ServiceWiringTests(unittest.IsolatedAsyncioTestCase):
         return events
 
     async def test_a_short_circuited_turn_never_builds_the_agent(self):
-        plan = TurnPlan(static_reply="Out of scope, sorry.", exposed_tools=[],
-                        reasons=["out of domain"])
+        plan = TurnPlan(
+            static_reply="Out of scope, sorry.", exposed_tools=[], reasons=["out of domain"]
+        )
         chunks, built = await self._stream(plan)
         self.assertEqual([], built)
         self.assertIn("data: [DONE]\n\n", chunks)
@@ -215,8 +231,9 @@ class ServiceWiringTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_short_circuited_turn_still_emits_a_trace(self):
         """A client must not have to know which path produced its answer."""
         plan = TurnPlan(static_reply="No.", exposed_tools=[], reasons=["out of domain"])
-        signals = RequestSignals(question="q", scope=Scope.OUT_OF_DOMAIN,
-                                 scope_certainty=Certainty.HIGH)
+        signals = RequestSignals(
+            question="q", scope=Scope.OUT_OF_DOMAIN, scope_certainty=Certainty.HIGH
+        )
         chunks, _ = await self._stream(plan, signals)
         traces = [e for e in self._events(chunks) if e.get("type") == "trace"]
         self.assertEqual(1, len(traces))
@@ -243,12 +260,12 @@ class ServiceWiringTests(unittest.IsolatedAsyncioTestCase):
             return FakeAgent()
 
         plan = TurnPlan(exposed_tools=["search_knowledge_base"])
-        with patch.object(service, "plan_turn", lambda *a, **k: (plan, RequestSignals())), \
-             patch.object(service, "create_agent_for_request", spy_create_agent), \
-             patch.object(service, "generate_session_title", lambda _t: "T"):
-            async for _ in service.chat_with_agent_stream(
-                "q", "u", "s", services=_forgetful()
-            ):
+        with (
+            patch.object(service, "plan_turn", lambda *a, **k: (plan, RequestSignals())),
+            patch.object(service, "create_agent_for_request", spy_create_agent),
+            patch.object(service, "generate_session_title", lambda _t: "T"),
+        ):
+            async for _ in service.chat_with_agent_stream("q", "u", "s", services=_forgetful()):
                 pass
 
         self.assertEqual(["search_knowledge_base"], captured["tools"])
@@ -259,8 +276,12 @@ class AgentFactoryTests(unittest.TestCase):
         import backend.agent.chat.runtime as runtime
 
         captured = {}
-        with patch.object(runtime, "build_tools", lambda names, ctx: captured.setdefault("n", names) or []), \
-             patch.object(runtime, "create_agent", lambda **kw: kw):
+        with (
+            patch.object(
+                runtime, "build_tools", lambda names, ctx: captured.setdefault("n", names) or []
+            ),
+            patch.object(runtime, "create_agent", lambda **kw: kw),
+        ):
             runtime.create_agent_for_request(object(), None)
         self.assertEqual(get_profile().agent.tools, captured["n"])
 
@@ -268,8 +289,12 @@ class AgentFactoryTests(unittest.TestCase):
         import backend.agent.chat.runtime as runtime
 
         captured = {}
-        with patch.object(runtime, "build_tools", lambda names, ctx: captured.setdefault("n", names) or []), \
-             patch.object(runtime, "create_agent", lambda **kw: kw):
+        with (
+            patch.object(
+                runtime, "build_tools", lambda names, ctx: captured.setdefault("n", names) or []
+            ),
+            patch.object(runtime, "create_agent", lambda **kw: kw),
+        ):
             runtime.create_agent_for_request(object(), [])
         self.assertEqual([], captured["n"])
 
@@ -308,6 +333,8 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
         return ToolMessage(content=content, tool_call_id="c1", name=name)
 
     async def _run(self, stream_items, trace, plan=None):
+        from langchain_core.messages import AIMessageChunk
+
         import backend.agent.chat.service as service
         from backend.agent.chat.turn_policy import TurnPlan
 
@@ -328,11 +355,14 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
                 return {"rag_trace": trace}
 
         chunks = []
-        with patch.object(service, "plan_turn",
-                          lambda *a, **k: (plan or TurnPlan(), RequestSignals())), \
-             patch.object(service, "create_agent_for_request", lambda ctx, tools=None: FakeAgent()), \
-             patch.object(service, "ChatRequestContext", Ctx), \
-             patch.object(service, "generate_session_title", lambda _t: "T"):
+        with (
+            patch.object(
+                service, "plan_turn", lambda *a, **k: (plan or TurnPlan(), RequestSignals())
+            ),
+            patch.object(service, "create_agent_for_request", lambda ctx, tools=None: FakeAgent()),
+            patch.object(service, "ChatRequestContext", Ctx),
+            patch.object(service, "generate_session_title", lambda _t: "T"),
+        ):
             async for chunk in service.chat_with_agent_stream(
                 "what is partner", "u", "s", services=_forgetful()
             ):
@@ -351,8 +381,11 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
         arabic = terminal_reply("no_knowledge", "ar")
         self.assertTrue(english)
         self.assertTrue(arabic)
-        self.assertEqual(english, terminal_reply("no_knowledge", "de"),
-                         "an unknown language falls back rather than blanking")
+        self.assertEqual(
+            english,
+            terminal_reply("no_knowledge", "de"),
+            "an unknown language falls back rather than blanking",
+        )
 
     def test_retrieval_error_and_no_knowledge_read_differently(self):
         import backend.agent.chat.service as service
@@ -486,13 +519,14 @@ class TerminalShortCircuitMiddlewareTests(unittest.TestCase):
         captured = {}
         # A real bound tool is what makes these tool-traffic guards relevant. Returning
         # [] here used to construct the invalid graph this regression now prevents.
-        with patch.object(runtime, "build_tools", lambda names, ctx: [object()]), \
-             patch.object(runtime, "create_agent", lambda **kw: captured.update(kw)):
+        with (
+            patch.object(runtime, "build_tools", lambda names, ctx: [object()]),
+            patch.object(runtime, "create_agent", lambda **kw: captured.update(kw)),
+        ):
             runtime.create_agent_for_request(self.Ctx("no_knowledge"), [KNOWLEDGE_TOOL])
 
         bound = " ".join(
-            f"{type(item).__name__} {getattr(item, 'name', '')}"
-            for item in captured["middleware"]
+            f"{type(item).__name__} {getattr(item, 'name', '')}" for item in captured["middleware"]
         )
         self.assertIn("_drop_repeated_calls", bound)
         self.assertIn("_stop_after_a_terminal_tool_result", bound)
@@ -530,12 +564,17 @@ class ShortCircuitedStreamTests(unittest.IsolatedAsyncioTestCase):
             def _generate(self, messages, stop=None, run_manager=None, **kw):
                 calls["model"] += 1
                 message = (
-                    AIMessage(content="", tool_calls=[{
-                        "name": "search_knowledge_base",
-                        "args": {"query": "partner"},
-                        "id": "c1",
-                        "type": "tool_call",
-                    }])
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "search_knowledge_base",
+                                "args": {"query": "partner"},
+                                "id": "c1",
+                                "type": "tool_call",
+                            }
+                        ],
+                    )
                     if calls["model"] == 1
                     else AIMessage(content="a reworded fallback nobody asked for")
                 )
@@ -575,7 +614,6 @@ class ShortCircuitedStreamTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(1, calls["model"], "the composing call was supposed to be skipped")
         self.assertEqual("retrieval_error", ctx.short)
-
 
 
 class TheContextReceivesThePlan(unittest.TestCase):
@@ -621,15 +659,28 @@ class TheContextReceivesThePlan(unittest.TestCase):
         from backend.agent.chat.orchestrator import _hand_to_graph
 
         class _OldContext:
-            def note_turn_plan(self, retrieval_sections, scope_options, *,
-                               carried_constraints=(), is_followup=False, language=""):
+            def note_turn_plan(
+                self,
+                retrieval_sections,
+                scope_options,
+                *,
+                carried_constraints=(),
+                is_followup=False,
+                language="",
+            ):
                 self.sections = list(retrieval_sections)
                 self.language = language
 
         ctx = _OldContext()
-        _hand_to_graph(ctx, TurnPlan(
-            retrieval_sections=["fees"], language="ar",
-            child_hint="ليلى", child_id="S-1", forced_tool="get_student_grades",
-        ))
+        _hand_to_graph(
+            ctx,
+            TurnPlan(
+                retrieval_sections=["fees"],
+                language="ar",
+                child_hint="ليلى",
+                child_id="S-1",
+                forced_tool="get_student_grades",
+            ),
+        )
         self.assertEqual(ctx.sections, ["fees"])
         self.assertEqual(ctx.language, "ar")

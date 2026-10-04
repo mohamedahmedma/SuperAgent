@@ -14,6 +14,7 @@ endpoint parses this path correctly, `test_langchain_alone_sends_the_shape_that_
 is what should start failing, which is the signal to delete the workaround rather than
 carry it forever.
 """
+
 import unittest
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -30,8 +31,10 @@ def _retrieved_once():
     return [
         SystemMessage(content="You are the school's assistant."),
         HumanMessage(content="مصاريف ابني كام؟"),
-        AIMessage(content="", tool_calls=[
-            {"name": "search_knowledge_base", "args": {"query": "رسوم"}, "id": "c1"}]),
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "search_knowledge_base", "args": {"query": "رسوم"}, "id": "c1"}],
+        ),
         ToolMessage(content=FEES, tool_call_id="c1"),
     ]
 
@@ -39,8 +42,12 @@ def _retrieved_once():
 def _retrieved_twice():
     """Two rounds, which is what a question about fees AND grades produces."""
     return _retrieved_once() + [
-        AIMessage(content="We need grades too.", tool_calls=[
-            {"name": "get_student_grades", "args": {"student_name": "فاطمة"}, "id": "c2"}]),
+        AIMessage(
+            content="We need grades too.",
+            tool_calls=[
+                {"name": "get_student_grades", "args": {"student_name": "فاطمة"}, "id": "c2"}
+            ],
+        ),
         ToolMessage(content=GRADES, tool_call_id="c2"),
     ]
 
@@ -59,16 +66,14 @@ class TheShapeThatBreaksTheParser(unittest.TestCase):
         """Pins the upstream behaviour being worked around. If this ever fails because
         the payload changed, re-measure before touching anything else."""
         sent = _payload(_model(False), _retrieved_once())
-        self.assertEqual([m["role"] for m in sent],
-                         ["system", "user", "assistant", "tool"])
+        self.assertEqual([m["role"] for m in sent], ["system", "user", "assistant", "tool"])
         self.assertTrue(sent[2]["tool_calls"])
 
 
 class TheFoldRemovesIt(unittest.TestCase):
     def test_no_tool_message_survives_the_fold(self):
         sent = _payload(_model(True), _retrieved_once())
-        self.assertEqual([m["role"] for m in sent],
-                         ["system", "user", "assistant", "user"])
+        self.assertEqual([m["role"] for m in sent], ["system", "user", "assistant", "user"])
         self.assertNotIn("tool", [m["role"] for m in sent])
         self.assertFalse(any(m.get("tool_calls") for m in sent))
 
@@ -110,9 +115,13 @@ class TheFoldRemovesIt(unittest.TestCase):
         reads as though the parent said all of them."""
         messages = [
             HumanMessage(content="مصاريف ودرجات؟"),
-            AIMessage(content="", tool_calls=[
-                {"name": "search_knowledge_base", "args": {}, "id": "c1"},
-                {"name": "get_student_grades", "args": {}, "id": "c2"}]),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "search_knowledge_base", "args": {}, "id": "c1"},
+                    {"name": "get_student_grades", "args": {}, "id": "c2"},
+                ],
+            ),
             ToolMessage(content=FEES, tool_call_id="c1"),
             ToolMessage(content=GRADES, tool_call_id="c2"),
         ]
@@ -135,8 +144,10 @@ class ATurnWithNoToolPaysNothing(unittest.TestCase):
     def test_the_wire_is_identical_with_and_without_the_fold(self):
         """Every turn before the first tool runs — the majority — must be byte-identical,
         so this cannot be the cause of a behaviour change nobody went looking for."""
-        chat = [SystemMessage(content="You are the school's assistant."),
-                HumanMessage(content="صباح الخير")]
+        chat = [
+            SystemMessage(content="You are the school's assistant."),
+            HumanMessage(content="صباح الخير"),
+        ]
         self.assertEqual(_payload(_model(False), chat), _payload(_model(True), chat))
 
 
@@ -154,11 +165,13 @@ class ItIsSafeToInstall(unittest.TestCase):
         self.assertIs(fold_tool_results_into_text(lazy), lazy)
 
     def test_installing_it_twice_folds_once(self):
-        model = fold_tool_results_into_text(fold_tool_results_into_text(
-            ChatOpenAI(model="openai/gpt-oss-20b", api_key="k", base_url="http://x")))
+        model = fold_tool_results_into_text(
+            fold_tool_results_into_text(
+                ChatOpenAI(model="openai/gpt-oss-20b", api_key="k", base_url="http://x")
+            )
+        )
         sent = _payload(model, _retrieved_once())
-        self.assertEqual([m["role"] for m in sent],
-                         ["system", "user", "assistant", "user"])
+        self.assertEqual([m["role"] for m in sent], ["system", "user", "assistant", "user"])
         self.assertEqual(sent[-1]["content"].count("search_knowledge_base"), 1)
 
 

@@ -26,6 +26,7 @@ Each `--provider` is: a label, the OpenAI-compatible base URL (without `/embeddi
 the provider's model id, and the NAME of the environment variable holding its key — the
 key itself never goes on the command line.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -116,8 +117,7 @@ def latency(embedder, texts, *, calls: int, concurrency: int) -> dict:
     for text in texts[:3]:  # warm the connection pool and any provider cold start
         embedder.embed_documents([text])
 
-    sequential = [timed(lambda t=t: embedder.embed_documents([t]))[0]
-                  for t in (texts * 10)[:calls]]
+    sequential = [timed(lambda t=t: embedder.embed_documents([t]))[0] for t in (texts * 10)[:calls]]
 
     errors = 0
 
@@ -129,7 +129,9 @@ def latency(embedder, texts, *, calls: int, concurrency: int) -> dict:
             errors += 1
             return None
 
-    wall, results = timed(lambda: list(ThreadPoolExecutor(concurrency).map(one, (texts * 10)[:calls])))
+    wall, results = timed(
+        lambda: list(ThreadPoolExecutor(concurrency).map(one, (texts * 10)[:calls]))
+    )
     parallel = [r for r in results if r is not None]
 
     batch_ms, _ = timed(lambda: embedder.embed_documents(texts[:32]))
@@ -158,7 +160,8 @@ def fidelity(reference: dict, vectors: dict) -> dict:
     report["returned_normalised"] = abs(norm(first) - 1.0) < 1e-3
     worst = min(group["min_cosine"] for key, group in report.items() if isinstance(group, dict))
     report["verdict"] = (
-        "same weights at full precision — keep the index" if worst >= SAME_WEIGHTS
+        "same weights at full precision — keep the index"
+        if worst >= SAME_WEIGHTS
         else "retrieval-equivalent (likely fp16/bf16) — keep the index, run the eval once"
         if worst >= RETRIEVAL_EQUIVALENT
         else "NOT the same vectors (quantised or a different model) — reindex and run the eval"
@@ -167,9 +170,16 @@ def fidelity(reference: dict, vectors: dict) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--provider", nargs=4, action="append", required=True,
-                        metavar=("LABEL", "BASE_URL", "MODEL", "KEY_ENV"))
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--provider",
+        nargs=4,
+        action="append",
+        required=True,
+        metavar=("LABEL", "BASE_URL", "MODEL", "KEY_ENV"),
+    )
     parser.add_argument("--texts", type=int, default=40, help="texts per group")
     parser.add_argument("--calls", type=int, default=40, help="latency calls per mode")
     parser.add_argument("--concurrency", type=int, default=8)
@@ -191,7 +201,9 @@ def main() -> int:
         vectors = {group: embedder.embed_documents(items) for group, items in texts.items()}
         results[label] = {
             "fidelity": fidelity(reference, vectors),
-            "latency": latency(embedder, everything, calls=args.calls, concurrency=args.concurrency),
+            "latency": latency(
+                embedder, everything, calls=args.calls, concurrency=args.concurrency
+            ),
         }
 
     Path(args.out).write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")

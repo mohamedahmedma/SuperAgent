@@ -50,11 +50,11 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "beautifulsoup4>=4.12.0",
     "langsmith>=0.7.22",
-    # Domain profile definitions (backend/agent/profiles/definitions/*.yaml). Previously
+    # Domain profile definitions (backend/profiles/definitions/*.yaml). Previously
     # available only transitively via langchain-core; imported directly now.
     "pyyaml>=6.0",
-    # Prompt templates (backend/agent/prompts/templates/**/*.j2). Same story as pyyaml: it
-    # arrives transitively via fastapi/langchain today, but backend.agent.prompts imports it
+    # Prompt templates (backend/prompts/templates/**/*.j2). Same story as pyyaml: it
+    # arrives transitively via fastapi/langchain today, but backend.prompts imports it
     # directly, so it is declared rather than relied on as someone else's dependency.
     "jinja2>=3.1",
     # Arabic matching (backend/text_matching.py), on the BM25 and name-lookup lanes.
@@ -102,10 +102,68 @@ exclude = ["frontend*", "tests*"]
 # Templates and profile definitions are data, not modules, so packages.find alone does
 # not ship them — an installed build would import fine and then fail at first render.
 [tool.setuptools.package-data]
-"backend.agent.prompts" = ["templates/**/*.j2"]
-"backend.agent.profiles" = ["definitions/*.yaml"]
+"backend.prompts" = ["templates/**/*.j2"]
+"backend.profiles" = ["definitions/*.yaml"]
 # The migration directory is not a package either, and the app reads its head at startup.
 "backend" = ["alembic.ini", "migrations/*.py", "migrations/*.mako", "migrations/versions/*.py"]
+
+[tool.ruff]
+# The codebase's own convention, measured rather than guessed: p95 of every line under src/
+# is 89 characters and p99 is 97. Ruff's default of 88 would rewrap 6.5% of all lines for
+# nothing; 100 leaves the existing hand-wrapping alone.
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Deliberately narrow. `F` and `B` find real defects, `E4`/`E7`/`E9` find real mistakes, and
+# `I` is mechanical and safe. Left OUT for now, each for a reason rather than by oversight:
+#   UP    1,327 sites of `List[x]` -> `list[x]` and `Optional[x]` -> `x | None`. Worth doing,
+#         but it is a modernisation pass of its own, not a foundation commit.
+#   ARG   775 hits, and nearly all are Protocol conformance or callback signatures, where an
+#         unused argument is the point.
+#   E1/E2/E3, E501  code width and whitespace belong to the formatter; comments and
+#         docstrings here are wrapped by hand and are the most valuable text in the repo.
+select = ["E4", "E7", "E9", "F", "W", "I", "B"]
+ignore = [
+    # `Depends(...)`, `File(...)` and `Form(...)` in a default argument IS FastAPI's idiom.
+    "B008",
+    # 29 sites. `zip(strict=True)` would be a real improvement, but it CHANGES behaviour by
+    # raising on length mismatch, and `strict=False` just restates the status quo. Audit the
+    # sites deliberately in their own commit instead of sweeping them here.
+    "B905",
+    # 23 sites of `raise X(...)` inside an `except` without `from`. The fix is mechanical,
+    # but WHICH exception is the cause is a judgment per site - `from err` to chain it, or
+    # `from None` where the original is noise a caller should not see - so it is its own pass.
+    "B904",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# E402 (imports not at top of file) is load-order, not sloppiness: every one of these sets
+# an environment variable, or stubs a module, BEFORE the first import of a service, because
+# the modules it reaches read their configuration once at import. conftest.py's docstring
+# explains the same constraint for the suites.
+"conftest.py" = ["E402"]
+"src/backend/app.py" = ["E402"]
+"src/backend/infra/database.py" = ["E402"]
+"src/backend/agent/rag/utils.py" = ["E402"]
+"tests/sis/conftest.py" = ["E402"]
+"tests/evals/*.py" = ["E402"]
+# Tests get latitude on style that production code does not. Each of these is either an
+# idiom of the test framework or harmless in a test, and every one was checked, not assumed:
+#   B017  asserting a bare Exception checks that a boundary refuses at all, separately from
+#         the tests that pin which error it refuses with
+#   F811  the pytest fixture idiom: `from ... import registrar  # noqa: F401` so pytest can
+#         find the fixture, then `registrar` as a parameter - all 43 hits are exactly that
+#   E741  `l` as a comprehension variable; production code is held to the rule
+#   B023  closures over a loop variable, consumed within the same iteration
+#   B018  attribute access whose side effect is the thing under test
+#   E731  a lambda bound to a name for one assertion
+#   F401  a fixture imported from another test module is USED - pytest injects it by name,
+#         which no static analysis can see. Proved the hard way: the autofix removed such
+#         imports from three sis test files and 36 tests errored with "fixture not found".
+# F841 and F821 are NOT waived here: in this codebase they found a cross-tenant permission
+# check that looked like an unused variable, and a test that never exercises what it names.
+"tests/**/*.py" = ["B017", "F811", "E741", "B023", "B018", "E731", "F401"]
 
 # The suites import the services directly and nothing is installed, so pytest has to
 # be told where they live. Without this every `from backend...` under tests/ fails.
@@ -116,6 +174,12 @@ pythonpath = ["src"]
 dev = [
     "graphviz>=0.21",
     "pytest>=8.3.0",
+    # Lint and format. Configured under [tool.ruff] above; CI runs both as checks so a
+    # formatting difference fails the build rather than arriving in someone else's diff.
+    "ruff>=0.14",
+    # Enforces the dependency rule between the layers. Contracts live in .importlinter,
+    # and they cover the NEW packages only until step 6G moves the last slice.
+    "import-linter>=2.3",
 ]
 
 # Linux containers run the embedding model on CPU. Without an explicit source,

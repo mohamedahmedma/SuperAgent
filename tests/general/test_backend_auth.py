@@ -5,17 +5,18 @@ a verifier, and these cover the properties that verifier must hold — above all
 fails closed and that authority comes from the signed token rather than from a local
 row anyone could edit.
 """
+
 import os
 import time
 import unittest
 
-import backend.infra.auth as backend_auth
-import backend.infra.identity as backend_identity
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from jose import jwt
 
+import backend.infra.auth as backend_auth
+import backend.infra.identity as backend_identity
 from backend.db.models import User
 from tests.general.postgres_support import postgres_schema
 
@@ -236,9 +237,7 @@ class BackendAuthTests(unittest.TestCase):
         """The new roles must not accidentally satisfy the old admin gate."""
         for role in ("parent", "staff", "user"):
             with self.assertRaises(HTTPException):
-                backend_auth.require_admin(
-                    backend_auth.AuthenticatedUser(username="p", role=role)
-                )
+                backend_auth.require_admin(backend_auth.AuthenticatedUser(username="p", role=role))
 
 
 class RemovedSurfaceTests(unittest.TestCase):

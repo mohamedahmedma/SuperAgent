@@ -6,6 +6,7 @@ change, and the way that is enforced is by asserting the backend never emits
 presentation: no HTML, no markdown image syntax, no field named after a component.
 What varies between clients is capability, declared per request.
 """
+
 import importlib
 import io
 import json
@@ -15,6 +16,15 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+from backend.agent.chat.assets_bridge import (
+    asset_ids_for_turn,
+    attach_assets_to_trace,
+    build_asset_references,
+    effective_capabilities,
+    restore_session_assets,
+    trace_for_storage,
+)
+from backend.agent.chat.request_context import ChatRequestContext
 from backend.assets.blobs import LocalBlobStore
 from backend.assets.delivery import (
     AssetPresenter,
@@ -37,16 +47,7 @@ from backend.assets.dossier import (
     compute_sha256,
 )
 from backend.assets.store import AssetStore
-from backend.agent.chat.assets_bridge import (
-    asset_ids_for_turn,
-    attach_assets_to_trace,
-    build_asset_references,
-    effective_capabilities,
-    restore_session_assets,
-    trace_for_storage,
-)
-from backend.agent.chat.request_context import ChatRequestContext
-from backend.agent.profiles.registry import load_profile
+from backend.profiles.registry import load_profile
 from tests.general.postgres_support import postgres_schema
 
 
@@ -59,13 +60,24 @@ def make_png(width=200, height=200, seed=1) -> bytes:
     return buffer.getvalue()
 
 
-def make_dossier(asset_id="doc.pdf::p1::img0", uri="file://ab/cd/x.png", caption="Fee schedule",
-                 byte_size=4096, sha256=None, extraction=True, role=AssetRole.FIGURE):
+def make_dossier(
+    asset_id="doc.pdf::p1::img0",
+    uri="file://ab/cd/x.png",
+    caption="Fee schedule",
+    byte_size=4096,
+    sha256=None,
+    extraction=True,
+    role=AssetRole.FIGURE,
+):
     payload = None
     if extraction:
         payload = ExtractionPayload(
-            text=TextSurface(caption=caption, description="A table of tuition fees.",
-                             transcription="Grade | Fee\n5 | 42000", tags=["fees"]),
+            text=TextSurface(
+                caption=caption,
+                description="A table of tuition fees.",
+                transcription="Grade | Fee\n5 | 42000",
+                tags=["fees"],
+            ),
             answerable_questions=["How much is grade 5?"],
             provenance=Provenance(tier=AssetTier.SIMPLE, model_used="test"),
         )
@@ -108,9 +120,7 @@ class RenditionTests(unittest.TestCase):
         self.assertIsNone(reference.url)
 
     def test_a_text_only_client_gets_metadata(self):
-        reference = self.presenter.present(
-            make_dossier(), ClientCapabilities(accepts_images=False)
-        )
+        reference = self.presenter.present(make_dossier(), ClientCapabilities(accepts_images=False))
         self.assertEqual(AssetRenditionMode.METADATA, reference.mode)
         self.assertIsNone(reference.url)
         self.assertIsNone(reference.inline_data)
@@ -180,7 +190,9 @@ class UrlEncodingTests(unittest.TestCase):
         self.assertTrue(url.startswith("/media/"))
 
     def test_base_path_is_configurable_for_proxied_deployments(self):
-        self.assertTrue(asset_url_path("x::p0::img0", base_path="/api/v2/media").startswith("/api/v2/media/"))
+        self.assertTrue(
+            asset_url_path("x::p0::img0", base_path="/api/v2/media").startswith("/api/v2/media/")
+        )
 
 
 class UiIndependenceTests(unittest.TestCase):
@@ -210,7 +222,9 @@ class UiIndependenceTests(unittest.TestCase):
     def test_the_contract_is_json_serialisable_and_reconstructible(self):
         """Any consumer in any language must be able to round-trip it."""
         original = self.presenter.present(make_dossier(), ClientCapabilities())
-        restored = AssetReference.model_validate(json.loads(json.dumps(original.model_dump(mode="json"))))
+        restored = AssetReference.model_validate(
+            json.loads(json.dumps(original.model_dump(mode="json")))
+        )
         self.assertEqual(original, restored)
 
     def test_a_text_only_channel_can_render_without_images(self):
@@ -296,12 +310,13 @@ class RequestContextAssetTests(unittest.TestCase):
         self.assertEqual(["a", "b", "c"], ctx.surfaced_asset_ids())
 
     def test_resetting_restores_the_knowledge_budget(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         budget = get_profile().agent.max_knowledge_calls_per_turn
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
         self.assertEqual(
-            [True] * budget + [False], [ctx.acquire_knowledge_tool_slot() for _ in range(budget + 1)]
+            [True] * budget + [False],
+            [ctx.acquire_knowledge_tool_slot() for _ in range(budget + 1)],
         )
         ctx.reset_knowledge_tool_budget()
         self.assertTrue(ctx.acquire_knowledge_tool_slot())
@@ -324,8 +339,9 @@ class AssetStoreTestCase(unittest.TestCase):
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(unit_of_work=unit_of_work, blob_store=self.blobs,
-                                cache_enabled=False)
+        self.store = AssetStore(
+            unit_of_work=unit_of_work, blob_store=self.blobs, cache_enabled=False
+        )
 
         data = make_png(60, 60)
         digest = compute_sha256(data)
@@ -342,6 +358,7 @@ class AssetStoreTestCase(unittest.TestCase):
 
         set_default_services(None)
         self._tmp.cleanup()
+
 
 class AssetsBridgeTests(unittest.TestCase):
     def setUp(self):
@@ -405,15 +422,30 @@ class AssetsBridgeTests(unittest.TestCase):
         from tests.general.test_chat_hitl_resume import FakeStorage
 
         storage = FakeStorage()
-        pipeline = TurnPipeline(TurnCollaborators(
-            conversations=storage, background=InlineJobs(), profile=None, plan=None,
-            resolve_question=None, create_agent=None, resume_retrieval=None, answer_model=None,
-            session_title=None, context_type=None,
-        ))
+        pipeline = TurnPipeline(
+            TurnCollaborators(
+                conversations=storage,
+                background=InlineJobs(),
+                profile=None,
+                plan=None,
+                resolve_question=None,
+                create_agent=None,
+                resume_retrieval=None,
+                answer_model=None,
+                session_title=None,
+                context_type=None,
+            )
+        )
         turn = Turn(
-            user_text="show me", user_id="u", session_id="s", caller=CallerIdentity.for_user("u"),
-            messages=[], metadata={}, child_state=SessionChild(),
-            is_first_message=True, history=[],
+            user_text="show me",
+            user_id="u",
+            session_id="s",
+            caller=CallerIdentity.for_user("u"),
+            messages=[],
+            metadata={},
+            child_state=SessionChild(),
+            is_first_message=True,
+            history=[],
         )
         turn.answer = "Here. [1]"
         turn.rag_trace = attach_assets_to_trace({"route": "answer"}, [AssetReference(asset_id="x")])
@@ -436,9 +468,7 @@ class AssetsBridgeTests(unittest.TestCase):
 
     def test_a_store_failure_costs_pictures_not_the_answer(self):
         _failing_asset_store(RuntimeError("db down"))
-        self.assertEqual(
-            [], build_asset_references(["a"], ClientCapabilities(), self.delivery)
-        )
+        self.assertEqual([], build_asset_references(["a"], ClientCapabilities(), self.delivery))
 
 
 def _failing_asset_store(error):
@@ -523,7 +553,8 @@ class StoredConversationAssetTests(unittest.TestCase):
 
         self.storage.append("u", "s", [MessageToStore("human", question)])
         self.storage.append(
-            "u", "s",
+            "u",
+            "s",
             [MessageToStore("ai", answer, rag_trace=trace_for_storage(trace))],
             metadata={},
         )
@@ -626,9 +657,7 @@ class StoredConversationAssetTests(unittest.TestCase):
                     cursor = page["messages"][0]["id"]
 
                 expected = [
-                    text
-                    for index in range(10)
-                    for text in (f"question {index}", f"answer {index}")
+                    text for index in range(10) for text in (f"question {index}", f"answer {index}")
                 ]
                 self.assertEqual(expected, seen)
                 self.assertEqual(4, pages, "20 messages in batches of 6")
@@ -682,11 +711,14 @@ class StoredConversationAssetTests(unittest.TestCase):
         self._long_conversation(turns=8)
 
         page = self._page(limit=4)
-        self.assertEqual([[], [], [], []], [
-            list((m["rag_trace"] or {}).get("asset_ids") or []) for m in page["messages"]
-        ])
+        self.assertEqual(
+            [[], [], [], []],
+            [list((m["rag_trace"] or {}).get("asset_ids") or []) for m in page["messages"]],
+        )
 
-        oldest = self.storage.get_session_page("u", "s", limit=4, before_id=page["messages"][0]["id"])
+        oldest = self.storage.get_session_page(
+            "u", "s", limit=4, before_id=page["messages"][0]["id"]
+        )
         while oldest["has_more"]:
             oldest = self.storage.get_session_page(
                 "u", "s", limit=4, before_id=oldest["messages"][0]["id"]
@@ -733,9 +765,7 @@ class StoredPointerRoundTripTests(AssetStoreTestCase):
         same figure is one `IN` query, and it stays one as the conversation grows."""
         records = [self._record([self.dossier.asset_id]) for _ in range(10)]
 
-        with patch.object(
-            self.store, "get_many", wraps=self.store.get_many
-        ) as get_many:
+        with patch.object(self.store, "get_many", wraps=self.store.get_many) as get_many:
             restored = restore_session_assets(records)
 
         self.assertEqual(1, get_many.call_count)
@@ -754,7 +784,9 @@ class StoredPointerRoundTripTests(AssetStoreTestCase):
             "type": "ai",
             "content": "Here it is.",
             "timestamp": "2026-01-01T00:00:00",
-            "rag_trace": {"assets": [{"asset_id": "old", "mode": "reference", "url": "/media/old"}]},
+            "rag_trace": {
+                "assets": [{"asset_id": "old", "mode": "reference", "url": "/media/old"}]
+            },
         }
         restored = restore_session_assets([legacy, self._record([self.dossier.asset_id])])
 
@@ -775,12 +807,19 @@ class SchemaContractTests(unittest.TestCase):
     def test_retrieved_chunks_carry_asset_ids_through_normalisation(self):
         from backend.agent.schemas.chat import normalize_rag_trace
 
-        trace = normalize_rag_trace({
-            "retrieved_chunks": [{
-                "filename": "doc.pdf", "text": "x", "chunk_id": "c1",
-                "modality": "figure", "asset_ids": ["doc.pdf::p1::img0"],
-            }],
-        })
+        trace = normalize_rag_trace(
+            {
+                "retrieved_chunks": [
+                    {
+                        "filename": "doc.pdf",
+                        "text": "x",
+                        "chunk_id": "c1",
+                        "modality": "figure",
+                        "asset_ids": ["doc.pdf::p1::img0"],
+                    }
+                ],
+            }
+        )
         chunk = trace["retrieved_chunks"][0]
         self.assertEqual(["doc.pdf::p1::img0"], chunk["asset_ids"])
         self.assertEqual("figure", chunk["modality"])
@@ -824,8 +863,9 @@ class AssetRouteTests(unittest.TestCase):
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(unit_of_work=unit_of_work, blob_store=self.blobs,
-                                cache_enabled=False)
+        self.store = AssetStore(
+            unit_of_work=unit_of_work, blob_store=self.blobs, cache_enabled=False
+        )
         set_default_services(Services(asset_store=self.store, blob_store=self.blobs))
 
         self.data = make_png(50, 50)
@@ -844,6 +884,7 @@ class AssetRouteTests(unittest.TestCase):
 
         set_default_services(None)
         self._tmp.cleanup()
+
     def _url(self, suffix=""):
         return asset_url_path(self.dossier.asset_id) + suffix
 
@@ -887,10 +928,13 @@ class AssetRouteTests(unittest.TestCase):
 
     def test_resolve_honours_declared_capabilities(self):
         """The integration path: a bot asks for inline bytes and gets them."""
-        response = self.client.post("/media/resolve", json={
-            "asset_ids": [self.dossier.asset_id],
-            "capabilities": {"prefers_inline": True, "max_inline_bytes": 10_000_000},
-        })
+        response = self.client.post(
+            "/media/resolve",
+            json={
+                "asset_ids": [self.dossier.asset_id],
+                "capabilities": {"prefers_inline": True, "max_inline_bytes": 10_000_000},
+            },
+        )
         asset = response.json()["assets"][0]
         self.assertEqual("inline", asset["mode"])
         self.assertTrue(asset["inline_data"].startswith("data:image/png;base64,"))
@@ -904,7 +948,8 @@ class AssetRouteTests(unittest.TestCase):
         self.assertEqual(404, self.client.get(self._url()).status_code)
 
     def test_asset_support_can_be_disabled_by_profile(self):
-        from backend.agent.profiles.registry import load_profile as load, set_profile
+        from backend.profiles.registry import load_profile as load
+        from backend.profiles.registry import set_profile
 
         profile = load("base").model_copy(deep=True)
         profile.assets.enabled = False
@@ -928,10 +973,10 @@ class CitationFilteringTests(unittest.TestCase):
         self.delivery = load_profile("base").assets.delivery
         self.trace = {
             "retrieved_chunks": [
-                {"filename": "kb.docx", "asset_ids": ["a1", "a2"]},   # [1]
-                {"filename": "kb.docx", "asset_ids": []},             # [2] text only
-                {"filename": "kb.docx", "asset_ids": ["a3"]},         # [3]
-                {"filename": "kb.docx", "asset_ids": ["a4"]},         # [4]
+                {"filename": "kb.docx", "asset_ids": ["a1", "a2"]},  # [1]
+                {"filename": "kb.docx", "asset_ids": []},  # [2] text only
+                {"filename": "kb.docx", "asset_ids": ["a3"]},  # [3]
+                {"filename": "kb.docx", "asset_ids": ["a4"]},  # [4]
             ]
         }
         self.ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
@@ -1041,7 +1086,9 @@ class CitationFilteringTests(unittest.TestCase):
         trace = {"retrieved_chunks": [{"asset_ids": ["a1"]}, {"asset_ids": ["a1", "a2"]}]}
         from backend.agent.chat.assets_bridge import asset_ids_for_answer
 
-        self.assertEqual(["a1", "a2"], asset_ids_for_answer("[1][2]", self.ctx, trace, self.delivery))
+        self.assertEqual(
+            ["a1", "a2"], asset_ids_for_answer("[1][2]", self.ctx, trace, self.delivery)
+        )
 
 
 class AttachmentEdgeCaseTests(unittest.TestCase):
@@ -1210,10 +1257,12 @@ class FigureMarkerTests(unittest.TestCase):
         """And it is figure ONE, not figure two: numbers count pictures, not chunks, so
         the leading text chunk does not consume a number the model would then be unable
         to write."""
-        message, ctx = self._run_tool([
-            self._doc("Fees are 45,000 EGP."),
-            self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"]),
-        ])
+        message, ctx = self._run_tool(
+            [
+                self._doc("Fees are 45,000 EGP."),
+                self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"]),
+            ]
+        )
         self.assertIn("Write the same marker", message)
         self.assertIn("[FIGURE 1]", message)
         self.assertEqual({1: "kb.docx::p0::img5"}, ctx.figure_numbers)

@@ -12,6 +12,7 @@ empty directory is a stranger holding a token.
 against a different SIS, or a CSV — reads this to see what the two methods are supposed to
 return, including the distinction between "nobody" and "could not ask".
 """
+
 from __future__ import annotations
 
 from identity.domain.errors import GuardianDirectoryUnavailable
@@ -42,18 +43,14 @@ class FakeGuardianDirectory:
         #: about sign-in gets a token with no children rather than having to say so.
         self.children: dict[str, list[ChildRef]] = dict(children or {})
 
-    def resolve(
-        self, phone_e164: str, *, school_code: str | None = None
-    ) -> GuardianRef | None:
+    def resolve(self, phone_e164: str, *, school_code: str | None = None) -> GuardianRef | None:
         self.asked.append(phone_e164)
         self.asked_schools.append(school_code)
         if self.unavailable:
             raise GuardianDirectoryUnavailable("The fake directory is switched off.")
         return self.guardians.get(phone_e164)
 
-    def children_of(
-        self, public_id: str, *, school_code: str | None = None
-    ) -> list[ChildRef]:
+    def children_of(self, public_id: str, *, school_code: str | None = None) -> list[ChildRef]:
         if self.unavailable:
             raise GuardianDirectoryUnavailable("The fake directory is switched off.")
         return list(self.children.get(public_id, ()))

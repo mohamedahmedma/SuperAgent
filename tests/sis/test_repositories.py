@@ -13,6 +13,7 @@ Building it from ORM metadata instead would test a schema no deployment has ever
 the migration is the artefact that reaches production, so it is the one the tests stand
 on. A column a migration forgot would pass a metadata-built suite and fail the school.
 """
+
 from collections.abc import Iterator
 from datetime import date, timedelta
 from pathlib import Path
@@ -104,7 +105,15 @@ def _seed_structure() -> None:
             ]
         )
         uow.year_levels.upsert_many(
-            [YearLevel(code="3", school_code="MAIN", name_en="Year 3", name_ar="السنة الثالثة", display_order=3)]
+            [
+                YearLevel(
+                    code="3",
+                    school_code="MAIN",
+                    name_en="Year 3",
+                    name_ar="السنة الثالثة",
+                    display_order=3,
+                )
+            ]
         )
         uow.class_sections.upsert_many(
             [

@@ -16,6 +16,7 @@ Letter boundaries and the pass mark are school policy. Two schools reading the s
 82% will disagree about whether it is a B or a B+, and neither is wrong — so this is
 configuration, not calculation, and it belongs on our side of the seam.
 """
+
 from __future__ import annotations
 
 import logging
@@ -34,7 +35,6 @@ PRIMARY_OFFICIAL = "official"
 _VALID_PRIMARY = (PRIMARY_ACADEMIC, PRIMARY_OFFICIAL)
 
 
-
 @dataclass(frozen=True)
 class GradingPolicy:
     """How a school reads a percentage.
@@ -51,7 +51,11 @@ class GradingPolicy:
 
     #: Descending boundaries; the first threshold the percentage meets or exceeds wins.
     letter_bands: tuple[tuple[float, str], ...] = (
-        (90.0, "A"), (80.0, "B"), (70.0, "C"), (60.0, "D"), (0.0, "F"),
+        (90.0, "A"),
+        (80.0, "B"),
+        (70.0, "C"),
+        (60.0, "D"),
+        (0.0, "F"),
     )
     pass_threshold: float = 60.0
 

@@ -1,4 +1,5 @@
 """Request and response shapes for parent sign-in over WhatsApp."""
+
 from datetime import datetime
 
 from pydantic import BaseModel, Field

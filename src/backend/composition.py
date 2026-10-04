@@ -32,6 +32,7 @@ background CLI jobs, and a chat turn served without one. It is a lazily built pr
 default, NOT the import-time singleton it replaces: nothing is constructed until
 something asks, and a caller with its own `Services` never consults it.
 """
+
 from __future__ import annotations
 
 import threading
@@ -39,17 +40,19 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
+    from backend.agent.chat.admission import TurnAdmission
+    from backend.agent.chat.attachments import ChatAttachments
+    from backend.agent.chat.background import JobRunner
+    from backend.agent.chat.storage import ConversationStorage
+    from backend.agent.chat.transcription import Transcriber
+    from backend.agent.rag.entity_retrieval import EntityRetriever
+    from backend.agent.rag.retrieval_cache import CorpusVersion, RetrievalCache
     from backend.application.ports import UnitOfWorkFactory
     from backend.assets.blobs import BlobStore
     from backend.assets.delivery import AssetPresenter
     from backend.assets.entity_store import EntityAttributeIndex
     from backend.assets.pipeline import FigurePipeline
     from backend.assets.store import AssetStore
-    from backend.agent.chat.admission import TurnAdmission
-    from backend.agent.chat.attachments import ChatAttachments
-    from backend.agent.chat.background import JobRunner
-    from backend.agent.chat.storage import ConversationStorage
-    from backend.agent.chat.transcription import Transcriber
     from backend.indexing.document_loader import DocumentLoader
     from backend.indexing.embedding import EmbeddingService
     from backend.indexing.milvus_client import MilvusStore
@@ -63,8 +66,6 @@ if TYPE_CHECKING:
     from backend.jobs.upload_jobs import IngestJobTracker
     from backend.llm_http import ProviderHttpClients
     from backend.llm_models import ChatModelFactory
-    from backend.agent.rag.entity_retrieval import EntityRetriever
-    from backend.agent.rag.retrieval_cache import CorpusVersion, RetrievalCache
 
 T = TypeVar("T")
 
@@ -343,7 +344,9 @@ class Services:
             from backend.agent.rag.retrieval_cache import RetrievalCache
             from backend.agent.rag.utils import retrieval_settings
 
-            return RetrievalCache.from_environment(self.cache, self.corpus_version, retrieval_settings())
+            return RetrievalCache.from_environment(
+                self.cache, self.corpus_version, retrieval_settings()
+            )
 
         return self._singleton("retrieval_cache", build)
 
@@ -414,7 +417,7 @@ class Services:
 
         def build() -> BlobStore:
             from backend.assets.blobs import build_blob_store
-            from backend.agent.profiles import get_profile
+            from backend.profiles import get_profile
 
             return build_blob_store(get_profile().assets)
 

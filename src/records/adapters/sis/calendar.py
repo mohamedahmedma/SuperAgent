@@ -6,11 +6,12 @@ next question, whereas a term's dates change when a registrar edits the school y
 minutes of staleness there costs nothing; a lookup on every parent question costs two SIS
 requests each.
 """
+
 from __future__ import annotations
 
 import logging
 import threading
-from typing import Final
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 from records.adapters.sis.http import PooledClient
@@ -50,7 +51,6 @@ class SisSchoolCalendar:
         #: making the same two SIS calls. See `_load`.
         self._refreshing: threading.Event | None = None
 
-
     def _get(self, path: str, params: dict | None = None):
         import httpx
 
@@ -58,13 +58,9 @@ class SisSchoolCalendar:
         try:
             response = self._pool.get().get(path, headers=headers, params=params or {})
         except httpx.HTTPError as error:
-            raise CalendarUnavailable(
-                f"The school calendar could not be read: {error}"
-            ) from error
+            raise CalendarUnavailable(f"The school calendar could not be read: {error}") from error
         if response.status_code >= 400:
-            raise CalendarUnavailable(
-                f"The school calendar answered {response.status_code}."
-            )
+            raise CalendarUnavailable(f"The school calendar answered {response.status_code}.")
         try:
             return response.json()
         except ValueError as error:
@@ -128,9 +124,7 @@ class SisSchoolCalendar:
         if not year_code:
             return []
 
-        payload = self._get(
-            "/v1/terms", {"academic_year": quote(year_code, safe="")}
-        )
+        payload = self._get("/v1/terms", {"academic_year": quote(year_code, safe="")})
         rows = payload if isinstance(payload, list) else (payload or {}).get("terms") or []
 
         terms = [
@@ -164,7 +158,9 @@ class SisSchoolCalendar:
             # The latest-starting of any that overlap today, matching what the local
             # implementation did: overlapping terms are a data problem, and picking the
             # one that started most recently is the least surprising resolution.
-            return sorted(current, key=lambda t: t.starts_on or datetime.min.replace(tzinfo=timezone.utc))[-1]
+            return sorted(
+                current, key=lambda t: t.starts_on or datetime.min.replace(tzinfo=timezone.utc)
+            )[-1]
         dated = [t for t in terms if t.starts_on is not None]
         if dated:
             return sorted(dated, key=lambda t: t.starts_on)[-1]

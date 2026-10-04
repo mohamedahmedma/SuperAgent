@@ -13,6 +13,7 @@ Two properties run through the whole file:
     boundary in both directions — the failure this protects against is an off-by-one that
     a test written on a Wednesday would never see.
 """
+
 import unittest
 from datetime import date
 

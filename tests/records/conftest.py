@@ -14,6 +14,7 @@ purpose. The records facade must need nothing but a public key, and a test suite
 reached into the identity service to mint a token would hide the day that stopped being
 true.
 """
+
 import os
 
 os.environ["RECORDS_LMS"] = "fake"
@@ -49,15 +50,15 @@ from fastapi.testclient import TestClient  # noqa: E402
 from jose import jwt  # noqa: E402
 
 from records.adapters.fake.calendar import FakeSchoolCalendar  # noqa: E402
-from records.adapters.fake.directory import FakeGuardianDirectory  # noqa: E402
 from records.adapters.fake.classroom import FakeClassrooms  # noqa: E402
+from records.adapters.fake.directory import FakeGuardianDirectory  # noqa: E402
 from records.adapters.fake.lms import FakeLms  # noqa: E402
 from records.adapters.fake.timetable import FakeTimetables  # noqa: E402
 from records.app import app  # noqa: E402
 from records.config import reset_settings  # noqa: E402
 from records.domain.classroom import (  # noqa: E402
-    ClassTeacher,
     ClassroomStatus,
+    ClassTeacher,
     StudentClassroom,
     StudySubject,
 )
@@ -70,6 +71,7 @@ from records.domain.timetable import (  # noqa: E402
     TimetablePeriodSlot,
     TimetableStatus,
 )
+
 
 def _isolate_from_the_environment() -> None:
     """Blank the settings that decide who this service talks to.
@@ -175,7 +177,12 @@ def _pin_identity_configuration():
 
 
 def install_adapters(
-    test_client, *, calendar=None, directory=None, lms=None, timetables=None,
+    test_client,
+    *,
+    calendar=None,
+    directory=None,
+    lms=None,
+    timetables=None,
     classrooms=None,
 ):
     """Point the running app at these fakes.

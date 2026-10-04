@@ -27,13 +27,15 @@ and makes a key's pending work visible in Redis, so `flush` waits for it whereve
 queued (RAG_FIX_PLAN item 21). It costs the save two Redis round trips, in the
 background, and the next turn one read. The reply is not held back at all.
 """
+
 from __future__ import annotations
 
 import logging
 import threading
 import time
 from collections.abc import Callable, Mapping
-from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout, wait
+from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Protocol
 
 logger = logging.getLogger(__name__)
@@ -73,7 +75,9 @@ class JobRunner(Protocol):
 class BackgroundJobs:
     """Ordered, keyed background work on small pools of threads, one per lane."""
 
-    def __init__(self, *, lanes: Mapping[str, int] | None = None, name: str = "chat-background") -> None:
+    def __init__(
+        self, *, lanes: Mapping[str, int] | None = None, name: str = "chat-background"
+    ) -> None:
         self._executors = {
             lane: ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"{name}-{lane}")
             for lane, workers in (lanes or _DEFAULT_LANES).items()
@@ -97,7 +101,9 @@ class BackgroundJobs:
         try:
             executor = self._executors[lane]
         except KeyError:
-            raise ValueError(f"no background lane named {lane!r}; known: {sorted(self._executors)}") from None
+            raise ValueError(
+                f"no background lane named {lane!r}; known: {sorted(self._executors)}"
+            ) from None
         future: Future = Future()
         with self._lock:
             if self._closed:
@@ -237,8 +243,11 @@ class SharedWriteBarrier:
             pipe.execute()
             return True
         except Exception:
-            logger.debug("shared write barrier unavailable; %s is visible to this process only",
-                         key, exc_info=True)
+            logger.debug(
+                "shared write barrier unavailable; %s is visible to this process only",
+                key,
+                exc_info=True,
+            )
             return False
 
     def _end(self, key: str) -> None:

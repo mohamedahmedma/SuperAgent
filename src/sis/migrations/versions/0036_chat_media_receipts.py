@@ -1,7 +1,7 @@
 """Add chat attachments plus per-recipient delivery and read receipts."""
-from alembic import op
-import sqlalchemy as sa
 
+import sqlalchemy as sa
+from alembic import op
 
 revision = "0036"
 down_revision = "0035"
@@ -25,7 +25,12 @@ def upgrade() -> None:
         sa.Column("mime_type", sa.String(length=128), nullable=False),
         sa.Column("size_bytes", sa.Integer(), nullable=False),
         sa.Column("duration_seconds", sa.Integer(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
         sa.ForeignKeyConstraint(["message_id"], ["chat_messages.id"], ondelete="CASCADE"),
         sa.CheckConstraint("kind IN ('image', 'file', 'audio')", name="ck_chat_attachments_kind"),
         sa.CheckConstraint("size_bytes > 0", name="ck_chat_attachments_size"),
@@ -50,8 +55,10 @@ def downgrade() -> None:
     op.drop_table("chat_receipts")
     op.drop_index("ix_chat_attachments_message_id", table_name="chat_attachments")
     op.drop_table("chat_attachments")
-    op.execute(sa.text(
-        "UPDATE chat_messages SET body = '[attachment removed]' WHERE length(trim(body)) = 0"
-    ))
+    op.execute(
+        sa.text(
+            "UPDATE chat_messages SET body = '[attachment removed]' WHERE length(trim(body)) = 0"
+        )
+    )
     with op.batch_alter_table("chat_messages") as batch:
         batch.create_check_constraint("ck_chat_messages_body_not_blank", "length(trim(body)) > 0")

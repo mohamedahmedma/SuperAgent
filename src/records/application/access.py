@@ -14,6 +14,7 @@ Lifted out of `records/auth.py`, where it sat beside the credential checks and c
 be exercised through an HTTP request. It raises domain errors rather than
 `HTTPException`; `api/errors.py` decides the status once.
 """
+
 from __future__ import annotations
 
 import logging
@@ -45,15 +46,9 @@ class AccessService:
         children on file", which is recoverable. `resolve` below raises properly.
         """
         try:
-            return list(
-                self._directory.children_of(
-                    guardian_external_id, school_code=school_code
-                )
-            )
+            return list(self._directory.children_of(guardian_external_id, school_code=school_code))
         except GuardianDirectoryUnavailable as error:
-            logger.error(
-                "Guardian directory unavailable while listing children: %s", error
-            )
+            logger.error("Guardian directory unavailable while listing children: %s", error)
             return []
 
     def resolve(
@@ -76,9 +71,7 @@ class AccessService:
         Telling a parent "no such child" because another service was briefly down is a lie
         about their own family, so it propagates as an outage and says so.
         """
-        children = self._directory.children_of(
-            guardian_external_id, school_code=school_code
-        )
+        children = self._directory.children_of(guardian_external_id, school_code=school_code)
         wanted = str(student_external_id)
         for child in children:
             if child.student_id == wanted:

@@ -23,6 +23,7 @@ is exactly the reported symptom -- moving the text models to Together leaves eve
 read on Groq, still spending a Groq quota, while every unit test agrees the switch worked.
 `VisionTests` exists to make that visible rather than surprising.
 """
+
 from __future__ import annotations
 
 import os

@@ -23,6 +23,7 @@ Fixing only what the repository managed proved the point: the container and api.
 were corrected and production still answered 413, from the one hop that was still
 hand-written. It is in `deploy/nginx/` now, and so is covered here.
 """
+
 import io
 import re
 import unittest
@@ -46,7 +47,7 @@ MINIMUM_UPLOAD_BYTES = 500 * 1024 * 1024
 #: container's config is ever consulted — which is exactly what production did on
 #: 2026-09-12, answering 413 from nginx/1.24.0 while the container ran a corrected 1.27.3.
 UPLOAD_UPSTREAMS = (
-    "backend:8000",    # frontend container -> backend, over the compose network
+    "backend:8000",  # frontend container -> backend, over the compose network
     "127.0.0.1:8000",  # host nginx -> backend
     "127.0.0.1:3000",  # host nginx -> frontend container
 )
@@ -125,7 +126,9 @@ class UploadCeilingTests(unittest.TestCase):
         # count so that adding a vhost needs no edit here, while losing one still fails.
         names = [p.relative_to(REPO_ROOT).as_posix() for p in checked]
         for required in REQUIRED_ON_PATH:
-            self.assertIn(required, names, f"{required} no longer reaches an upload upstream; found {names}")
+            self.assertIn(
+                required, names, f"{required} no longer reaches an upload upstream; found {names}"
+            )
 
     def test_the_hops_agree(self):
         """The smallest ceiling on the path is the one that answers, and it is invisible.
@@ -137,7 +140,10 @@ class UploadCeilingTests(unittest.TestCase):
         limits = {
             path.relative_to(REPO_ROOT).as_posix(): _declared_limit(path)
             for path in _nginx_configs()
-            if any(u in _strip_comments(io.open(path, encoding="utf-8").read()) for u in UPLOAD_UPSTREAMS)
+            if any(
+                u in _strip_comments(io.open(path, encoding="utf-8").read())
+                for u in UPLOAD_UPSTREAMS
+            )
         }
         self.assertEqual(
             len(set(limits.values())),

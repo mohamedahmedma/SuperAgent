@@ -9,6 +9,7 @@ The most important assertion in the file is the first: **preview writes nothing*
 other guarantee is downstream of it, because the whole two-step flow exists so a registrar
 can read what an upload would do before it does it.
 """
+
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -30,10 +31,10 @@ from sis.domain.errors import (
     UploadTooLarge,
 )
 from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
-from sis.domain.imports import ImportKind, RowOutcome as StoredOutcome
+from sis.domain.imports import ImportKind
+from sis.domain.imports import RowOutcome as StoredOutcome
 from sis.domain.people import Student
 from sis.domain.value_objects import Phone, StudentNumber
-
 from tests.sis.conftest import FakeUnitOfWork, StubParser
 
 NOW = datetime(2026, 3, 1, 9, 0, tzinfo=UTC)
@@ -261,9 +262,7 @@ def test_a_phone_held_by_a_differently_named_adult_is_refused(
     enrolled: FakeUnitOfWork,
 ) -> None:
     """A recycled number must not inherit the previous family's records."""
-    enrolled.guardians.upsert_many(
-        [Guardian(phones=(Phone(MOTHER),), full_name_en="Fatma Ali")]
-    )
+    enrolled.guardians.upsert_many([Guardian(phones=(Phone(MOTHER),), full_name_en="Fatma Ali")])
 
     service = _service(enrolled, [_row(2, "S-2", MOTHER, name_en="Someone Else")])
     result = _preview(service)
@@ -276,11 +275,7 @@ def test_a_phone_held_by_a_differently_named_adult_is_refused(
 def test_a_blank_name_never_overwrites_a_stored_one(enrolled: FakeUnitOfWork) -> None:
     """A sheet with an empty column must not blank a name a registrar typed by hand."""
     enrolled.guardians.upsert_many(
-        [
-            Guardian(
-                phones=(Phone(MOTHER),), full_name_ar="فاطمة علي", full_name_en="Fatma Ali"
-            )
-        ]
+        [Guardian(phones=(Phone(MOTHER),), full_name_ar="فاطمة علي", full_name_en="Fatma Ali")]
     )
 
     service = _service(enrolled, [_row(2, "S-1", MOTHER, name_en="", name_ar="فاطمة علي")])
@@ -304,8 +299,7 @@ def test_the_sheet_can_withhold_records_access(enrolled: FakeUnitOfWork) -> None
     _commit(service)
 
     access = {
-        str(link.guardian_phone): link.can_view_records
-        for link in enrolled.student_guardians.all()
+        str(link.guardian_phone): link.can_view_records for link in enrolled.student_guardians.all()
     }
     assert access == {MOTHER: True, BROTHER: False}
 
@@ -405,9 +399,7 @@ def test_an_oversized_upload_is_refused_before_parsing(
 
     with pytest.raises(UploadTooLarge):
         service.preview(
-            GuardianPreviewCommand(
-                filename="g.csv", content=b"far too long", actor="registrar"
-            )
+            GuardianPreviewCommand(filename="g.csv", content=b"far too long", actor="registrar")
         )
     assert parser.calls == []
 
@@ -440,9 +432,7 @@ def test_a_changed_relationship_reports_updated(enrolled: FakeUnitOfWork) -> Non
     _preview(first)
     _commit(first)
 
-    second = _service(
-        enrolled, [_row(2, "S-1", MOTHER, relationship=RelationshipType.GUARDIAN)]
-    )
+    second = _service(enrolled, [_row(2, "S-1", MOTHER, relationship=RelationshipType.GUARDIAN)])
     _preview(second)
     _commit(second)
 
@@ -464,9 +454,7 @@ def test_a_link_created_by_someone_else_since_the_preview_is_refused(
     _preview(service)
 
     # Somebody else links the same pair, with a different relationship, in between.
-    enrolled.guardians.upsert_many(
-        [Guardian(phones=(Phone(MOTHER),), full_name_en="Fatma Ali")]
-    )
+    enrolled.guardians.upsert_many([Guardian(phones=(Phone(MOTHER),), full_name_en="Fatma Ali")])
     enrolled.student_guardians.upsert_many(
         [
             StudentGuardian(

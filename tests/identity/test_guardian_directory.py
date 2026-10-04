@@ -9,6 +9,7 @@ real failure. Treat unreachable as unknown and a network blip tells a mother she
 registered; treat unknown as unreachable and a stranger is told the school is merely busy,
 which invites them to keep trying.
 """
+
 import json
 from unittest.mock import patch
 

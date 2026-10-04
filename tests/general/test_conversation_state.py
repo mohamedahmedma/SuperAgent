@@ -4,6 +4,7 @@ The second batch of fixes from the 2026-09-14 review. Each class here is one rul
 session state — the pending question, the child pin, the hints a resumed search runs
 with — stated small enough that a regression names the rule.
 """
+
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -16,8 +17,8 @@ from backend.agent.chat.clarification import build_pending_hitl, enter_turn
 from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.resolution import unresolved
 from backend.agent.chat.turn_pipeline import TurnCollaborators, TurnPipeline
-from backend.agent.profiles import get_profile
 from backend.agent.rag.hitl_resume import build_hitl_resume_state
+from backend.profiles import get_profile
 from tests.general.test_chat_hitl_resume import FakeStorage
 
 ASKED_AT = datetime(2026, 9, 14, 8, 0, tzinfo=timezone.utc)
@@ -76,7 +77,9 @@ class TheChildPinIsWrittenOnlyWhenItChanged(unittest.TestCase):
         turn.ctx.remember_child("S-1", label="ليلى", gender="female")
 
         pin = pipeline.save_metadata(turn)[SESSION_CHILD_KEY]
-        self.assertEqual(("S-1", "ليلى", "G-1"), (pin["student_id"], pin["label"], pin["guardian_id"]))
+        self.assertEqual(
+            ("S-1", "ليلى", "G-1"), (pin["student_id"], pin["label"], pin["guardian_id"])
+        )
 
     def test_a_pin_another_turn_wrote_meanwhile_survives_this_turns_save(self):
         storage = FakeStorage()
@@ -107,7 +110,11 @@ class TheChildPinIsWrittenOnlyWhenItChanged(unittest.TestCase):
     def test_a_pin_another_guardian_left_is_dropped(self):
         """The custody-transfer path: the account was rebound, and the previous family's
         pin is not this caller's to inherit — nor to leave lying in the metadata."""
-        storage = FakeStorage(metadata={SESSION_CHILD_KEY: {"student_id": "S-9", "label": "عمر", "guardian_id": "G-old"}})
+        storage = FakeStorage(
+            metadata={
+                SESSION_CHILD_KEY: {"student_id": "S-9", "label": "عمر", "guardian_id": "G-old"}
+            }
+        )
         pipeline = _pipeline(storage)
 
         pin = pipeline.save_metadata(_turn(pipeline))[SESSION_CHILD_KEY]
@@ -122,7 +129,11 @@ class AResumedSearchRunsUnderTheHintsItsQuestionWasAskedWith(unittest.TestCase):
     search resumes — the same way the conditions and the round count already did.
     """
 
-    ASKED = {"retrieval_status": "needs_clarification", "route": "clarify", "hitl_prompt": "Which term?"}
+    ASKED = {
+        "retrieval_status": "needs_clarification",
+        "route": "clarify",
+        "hitl_prompt": "Which term?",
+    }
 
     def _graph_result(self) -> dict:
         """What the graph leaves behind when it stops to ask, on a planned turn."""
@@ -142,7 +153,12 @@ class AResumedSearchRunsUnderTheHintsItsQuestionWasAskedWith(unittest.TestCase):
 
         self.assertEqual(
             ("ar", "Year 6", ["fees"], ["عمر"]),
-            (carried["language"], carried["child_year"], carried["retrieval_sections"], carried["child_names"]),
+            (
+                carried["language"],
+                carried["child_year"],
+                carried["retrieval_sections"],
+                carried["child_names"],
+            ),
         )
 
     def _resume(self, resume_state: dict) -> dict:
@@ -172,17 +188,26 @@ class AResumedSearchRunsUnderTheHintsItsQuestionWasAskedWith(unittest.TestCase):
     def test_the_resumed_search_gets_them_back(self):
         seen = self._resume(build_hitl_resume_state(self._graph_result()))
 
-        self.assertEqual({"language": "ar", "child_year": "Year 6", "sections": ["fees"], "names": ["عمر"]}, seen)
+        self.assertEqual(
+            {"language": "ar", "child_year": "Year 6", "sections": ["fees"], "names": ["عمر"]}, seen
+        )
 
     def test_a_question_paused_before_the_hints_were_carried_resumes_as_an_unplanned_turn(self):
-        seen = self._resume({"question": "مصاريف عمر", "route": "clarify", "retrieval_status": "needs_clarification"})
+        seen = self._resume(
+            {
+                "question": "مصاريف عمر",
+                "route": "clarify",
+                "retrieval_status": "needs_clarification",
+            }
+        )
 
         self.assertEqual({"language": "", "child_year": "", "sections": [], "names": []}, seen)
 
 
 def _pending_asked_at(moment: datetime) -> dict:
     pending = build_pending_hitl(
-        {"retrieval_status": "needs_clarification", "hitl_prompt": "Which year group?"}, "what are the fees?"
+        {"retrieval_status": "needs_clarification", "hitl_prompt": "Which year group?"},
+        "what are the fees?",
     )
     pending["created_at"] = moment.isoformat()
     return pending
@@ -197,15 +222,28 @@ class APendingQuestionExpires(unittest.TestCase):
     """
 
     def _entry(self, asked: datetime, now: datetime, **overrides):
-        resolver = Mock(side_effect=AssertionError("an expired question must not reach the resolver"))
+        resolver = Mock(
+            side_effect=AssertionError("an expired question must not reach the resolver")
+        )
         return enter_turn(
-            "when does school start?", [], {"pending_hitl": _pending_asked_at(asked)}, resolve=resolver, now=now, **overrides
+            "when does school start?",
+            [],
+            {"pending_hitl": _pending_asked_at(asked)},
+            resolve=resolver,
+            now=now,
+            **overrides,
         )
 
     def test_a_question_asked_yesterday_still_waits(self):
         entry = enter_turn(
-            "Year 4", [], {"pending_hitl": _pending_asked_at(ASKED_AT)},
-            resolve=Mock(return_value=SimpleNamespace(supersedes_pending_question=False, question="", constraints=[], resolved=False)),
+            "Year 4",
+            [],
+            {"pending_hitl": _pending_asked_at(ASKED_AT)},
+            resolve=Mock(
+                return_value=SimpleNamespace(
+                    supersedes_pending_question=False, question="", constraints=[], resolved=False
+                )
+            ),
             now=ASKED_AT + timedelta(hours=23),
         )
         self.assertIsNotNone(entry.pending_hitl)
@@ -215,24 +253,40 @@ class APendingQuestionExpires(unittest.TestCase):
         entry = self._entry(ASKED_AT, ASKED_AT + timedelta(days=2))
 
         self.assertIsNone(entry.pending_hitl)
-        self.assertTrue(entry.invalid_pending_hitl, "cleared at the save, so the next message is not read against it either")
+        self.assertTrue(
+            entry.invalid_pending_hitl,
+            "cleared at the save, so the next message is not read against it either",
+        )
         self.assertFalse(entry.is_hitl_resume)
         self.assertEqual("when does school start?", entry.effective_user_text)
 
     def test_a_question_with_no_readable_timestamp_is_kept(self):
         pending = _pending_asked_at(ASKED_AT)
         pending["created_at"] = "sometime"
-        resolution = SimpleNamespace(supersedes_pending_question=False, question="", constraints=[], resolved=False)
-        entry = enter_turn("Year 4", [], {"pending_hitl": pending}, resolve=Mock(return_value=resolution), now=ASKED_AT + timedelta(days=30))
+        resolution = SimpleNamespace(
+            supersedes_pending_question=False, question="", constraints=[], resolved=False
+        )
+        entry = enter_turn(
+            "Year 4",
+            [],
+            {"pending_hitl": pending},
+            resolve=Mock(return_value=resolution),
+            now=ASKED_AT + timedelta(days=30),
+        )
         self.assertIsNotNone(entry.pending_hitl)
 
     def test_a_ttl_of_zero_never_expires(self):
         profile = SimpleNamespace(agent=SimpleNamespace(clarification_ttl_minutes=0))
-        resolution = SimpleNamespace(supersedes_pending_question=False, question="", constraints=[], resolved=False)
+        resolution = SimpleNamespace(
+            supersedes_pending_question=False, question="", constraints=[], resolved=False
+        )
         with patch("backend.agent.chat.clarification.get_profile", return_value=profile):
             entry = enter_turn(
-                "Year 4", [], {"pending_hitl": _pending_asked_at(ASKED_AT)},
-                resolve=Mock(return_value=resolution), now=ASKED_AT + timedelta(days=365),
+                "Year 4",
+                [],
+                {"pending_hitl": _pending_asked_at(ASKED_AT)},
+                resolve=Mock(return_value=resolution),
+                now=ASKED_AT + timedelta(days=365),
             )
         self.assertIsNotNone(entry.pending_hitl)
 

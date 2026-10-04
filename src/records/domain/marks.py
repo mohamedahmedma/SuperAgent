@@ -13,6 +13,7 @@ real Moodle instance: 65% against 80% for the same child.
 **Nothing is silently absent.** A missing figure carries a reason. A model handed `null`
 will narrate a plausible one; a model handed `"points_not_percentage"` will not.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

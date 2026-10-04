@@ -14,6 +14,7 @@ and not a guess.
 
 Nothing commits; the caller's transaction boundary decides.
 """
+
 import logging
 from collections.abc import Sequence
 from datetime import datetime, timezone

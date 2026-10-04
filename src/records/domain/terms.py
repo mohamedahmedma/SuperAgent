@@ -4,6 +4,7 @@ A value object built at the boundary, which is what lets it never be naive: the 
 this replaced came back without a timezone from SQLite and every caller had to remember
 to re-attach one before comparing.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

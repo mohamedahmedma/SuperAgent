@@ -9,6 +9,7 @@ hard-coded `is_active` and `created_at` and named its columns literally, so the 
 migration added one the seeded row and every other row in the service would have differed
 -- and nothing would have reported it, because the row is valid, just not the same.
 """
+
 from __future__ import annotations
 
 from sis.domain.structure import School
@@ -24,9 +25,7 @@ def seed_school_row(code: str, *, name_en: str = "", name_ar: str = "") -> None:
     they do not is an `UnknownSchool` naming the school that was just created.
     """
     with SqlAlchemyUnitOfWork(school_code=code) as uow:
-        uow.schools.upsert_many(
-            [School(code=code, name_en=name_en or code, name_ar=name_ar or "")]
-        )
+        uow.schools.upsert_many([School(code=code, name_en=name_en or code, name_ar=name_ar or "")])
         uow.commit()
 
 

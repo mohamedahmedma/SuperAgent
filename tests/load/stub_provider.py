@@ -32,6 +32,7 @@ Latency defaults approximate a hosted provider seen from the production server: 
 for a structured call, ~0.4 s to first token, and ~450 ms per embedding (Novita measured
 from Contabo, RAG_FIX_PLAN item 39).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,7 +40,11 @@ import asyncio
 import hashlib
 import json
 import math
+
+# Started as its own uvicorn process, so nothing else puts the services on the path.
+import os.path as _p
 import random
+import sys as _sys
 import time
 import uuid
 from typing import Any
@@ -47,9 +52,6 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-# Started as its own uvicorn process, so nothing else puts the services on the path.
-import os.path as _p
-import sys as _sys
 _sys.path.insert(0, _p.join(_p.dirname(_p.dirname(_p.dirname(_p.abspath(__file__)))), "src"))
 
 from backend.provider_compat import CONTEXT_HEADING
@@ -60,19 +62,30 @@ KNOWLEDGE_TOOL = "search_knowledge_base"
 # knowledge-base path. Keyed by the schema NAME the backend sends — the Pydantic class
 # name. A schema not listed is still answered, from its own definition.
 ROUTE = {
-    "RequestEnvelope": {"scope": "in_domain", "needed_tools": [KNOWLEDGE_TOOL],
-                        "about_child": False, "child_reference": "none"},
+    "RequestEnvelope": {
+        "scope": "in_domain",
+        "needed_tools": [KNOWLEDGE_TOOL],
+        "about_child": False,
+        "child_reference": "none",
+    },
     "ScopeVerdict": {"scope": "in_domain"},
     "ResolvedQuery": {"intent": "standalone"},
     "ComplexityResult": {"complexity": "simple"},
-    "EvidenceGrade": {"relevance": "strong", "answerability": "sufficient",
-                      "ambiguity": "none", "route": "answer", "confidence": 0.9,
-                      "supporting_chunks": [1, 2]},
+    "EvidenceGrade": {
+        "relevance": "strong",
+        "answerability": "sufficient",
+        "ambiguity": "none",
+        "route": "answer",
+        "confidence": 0.9,
+        "supporting_chunks": [1, 2],
+    },
 }
 
-ANSWER = ("According to the school's published material, the answer is set out in the "
-          "handbook section on this topic. Fees are reviewed each year and the office can "
-          "confirm the figure for the current term. ")
+ANSWER = (
+    "According to the school's published material, the answer is set out in the "
+    "handbook section on this topic. Fees are reviewed each year and the office can "
+    "confirm the figure for the current term. "
+)
 
 
 class Quota:
@@ -127,6 +140,7 @@ def _wait(ms: float) -> float:
 
 # -- schema instances ----------------------------------------------------------------
 
+
 def _resolve_ref(schema: dict, root: dict) -> dict:
     ref = schema.get("$ref")
     if not ref:
@@ -153,8 +167,10 @@ def instance(schema: dict, root: dict | None = None, *, question: str = "") -> A
     if isinstance(kind, list):
         kind = next((k for k in kind if k != "null"), "null")
     if kind == "object" or "properties" in schema:
-        return {name: instance(sub, root, question=question)
-                for name, sub in (schema.get("properties") or {}).items()}
+        return {
+            name: instance(sub, root, question=question)
+            for name, sub in (schema.get("properties") or {}).items()
+        }
     if kind == "array":
         return []
     if kind == "integer":
@@ -174,8 +190,9 @@ def structured_answer(response_format: dict, question: str) -> dict:
     name = spec.get("name") or schema.get("title") or ""
     value = instance(schema, question=question) if schema else {}
     if isinstance(value, dict):
-        value.update({k: v for k, v in ROUTE.get(name, {}).items()
-                      if k in (schema.get("properties") or {})})
+        value.update(
+            {k: v for k, v in ROUTE.get(name, {}).items() if k in (schema.get("properties") or {})}
+        )
         if name == "ResolvedQuery":
             value["question"] = question
             value["search_text"] = question
@@ -183,6 +200,7 @@ def structured_answer(response_format: dict, question: str) -> dict:
 
 
 # -- request reading -----------------------------------------------------------------
+
 
 def _text(content: Any) -> str:
     if isinstance(content, str):
@@ -243,16 +261,23 @@ async def stats() -> dict:
 
 def _completion(model: str, message: dict, finish: str) -> dict:
     return {
-        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}", "object": "chat.completion",
-        "created": int(time.time()), "model": model,
+        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
         "choices": [{"index": 0, "message": message, "finish_reason": finish}],
         "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
     }
 
 
 def _chunk(model: str, delta: dict, finish: str | None = None) -> str:
-    body = {"id": "chatcmpl-stub", "object": "chat.completion.chunk", "created": int(time.time()),
-            "model": model, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+    body = {
+        "id": "chatcmpl-stub",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+    }
     return f"data: {json.dumps(body)}\n\n"
 
 
@@ -265,10 +290,17 @@ async def chat_completions(request: Request):
         if not admitted:
             _count(f"429:{model}")
             return JSONResponse(
-                {"error": {"message": f"Rate limit reached for model `{model}` on requests per "
-                                      f"minute (RPM): Limit {Quota.rpm}", "type": "requests",
-                           "code": "rate_limit_exceeded"}},
-                status_code=429, headers=headers)
+                {
+                    "error": {
+                        "message": f"Rate limit reached for model `{model}` on requests per "
+                        f"minute (RPM): Limit {Quota.rpm}",
+                        "type": "requests",
+                        "code": "rate_limit_exceeded",
+                    }
+                },
+                status_code=429,
+                headers=headers,
+            )
         response = await _chat_completion(body, model)
         response.headers.update(headers)
         return response
@@ -289,10 +321,12 @@ async def _chat_completion(body: dict, model: str):
         await asyncio.sleep(_wait(Latency.structured_ms))
         content = json.dumps(structured_answer(fmt, question))
         if stream:
+
             async def one():
                 yield _chunk(model, {"role": "assistant", "content": content})
                 yield _chunk(model, {}, "stop")
                 yield "data: [DONE]\n\n"
+
             return StreamingResponse(one(), media_type="text/event-stream")
         return JSONResponse(_completion(model, {"role": "assistant", "content": content}, "stop"))
 
@@ -301,28 +335,41 @@ async def _chat_completion(body: dict, model: str):
     wanted = forced_tool(body.get("tool_choice"))
     if tools and not tool_ran and body.get("tool_choice") != "none":
         name = wanted or (KNOWLEDGE_TOOL if KNOWLEDGE_TOOL in names else names[0])
-        spec = next((t["function"] for t in tools if (t.get("function") or {}).get("name") == name), {})
+        spec = next(
+            (t["function"] for t in tools if (t.get("function") or {}).get("name") == name), {}
+        )
         args = instance(spec.get("parameters") or {"type": "object"}, question=question)
         if isinstance(args, dict) and "query" in args:
             args["query"] = question
-        call = {"id": f"call_{uuid.uuid4().hex[:10]}", "type": "function",
-                "function": {"name": name, "arguments": json.dumps(args)}}
+        call = {
+            "id": f"call_{uuid.uuid4().hex[:10]}",
+            "type": "function",
+            "function": {"name": name, "arguments": json.dumps(args)},
+        }
         _count(f"tool:{name}")
         await asyncio.sleep(_wait(Latency.toolcall_ms))
         if stream:
+
             async def tool_stream():
-                yield _chunk(model, {"role": "assistant", "content": None,
-                                     "tool_calls": [{"index": 0, **call}]})
+                yield _chunk(
+                    model,
+                    {"role": "assistant", "content": None, "tool_calls": [{"index": 0, **call}]},
+                )
                 yield _chunk(model, {}, "tool_calls")
                 yield "data: [DONE]\n\n"
+
             return StreamingResponse(tool_stream(), media_type="text/event-stream")
-        return JSONResponse(_completion(
-            model, {"role": "assistant", "content": None, "tool_calls": [call]}, "tool_calls"))
+        return JSONResponse(
+            _completion(
+                model, {"role": "assistant", "content": None, "tool_calls": [call]}, "tool_calls"
+            )
+        )
 
     # 3. text — the answer
     _count("answer")
     words = (ANSWER * 8).split(" ")[: Latency.tokens]
     if stream:
+
         async def text_stream():
             await asyncio.sleep(_wait(Latency.ttft_ms))
             yield _chunk(model, {"role": "assistant", "content": ""})
@@ -331,9 +378,12 @@ async def _chat_completion(body: dict, model: str):
                 await asyncio.sleep(_wait(Latency.token_ms))
             yield _chunk(model, {}, "stop")
             yield "data: [DONE]\n\n"
+
         return StreamingResponse(text_stream(), media_type="text/event-stream")
     await asyncio.sleep(_wait(Latency.ttft_ms + Latency.token_ms * len(words)))
-    return JSONResponse(_completion(model, {"role": "assistant", "content": " ".join(words)}, "stop"))
+    return JSONResponse(
+        _completion(model, {"role": "assistant", "content": " ".join(words)}, "stop")
+    )
 
 
 def unit_vector(text: str, dim: int) -> list[float]:
@@ -352,12 +402,17 @@ async def embeddings(request: Request):
     texts = [inputs] if isinstance(inputs, str) else list(inputs or [])
     _count("embeddings")
     await asyncio.sleep(_wait(Latency.embed_ms))
-    return JSONResponse({
-        "object": "list", "model": body.get("model", "stub"),
-        "data": [{"object": "embedding", "index": i, "embedding": unit_vector(t, Latency.embed_dim)}
-                 for i, t in enumerate(texts)],
-        "usage": {"prompt_tokens": 10 * len(texts), "total_tokens": 10 * len(texts)},
-    })
+    return JSONResponse(
+        {
+            "object": "list",
+            "model": body.get("model", "stub"),
+            "data": [
+                {"object": "embedding", "index": i, "embedding": unit_vector(t, Latency.embed_dim)}
+                for i, t in enumerate(texts)
+            ],
+            "usage": {"prompt_tokens": 10 * len(texts), "total_tokens": 10 * len(texts)},
+        }
+    )
 
 
 def main() -> None:
@@ -367,22 +422,46 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8900)
     for name in ("structured_ms", "toolcall_ms", "ttft_ms", "token_ms", "embed_ms", "jitter"):
-        parser.add_argument("--" + name.replace("_", "-"), type=float, default=getattr(Latency, name))
+        parser.add_argument(
+            "--" + name.replace("_", "-"), type=float, default=getattr(Latency, name)
+        )
     parser.add_argument("--tokens", type=int, default=Latency.tokens)
     parser.add_argument("--embed-dim", type=int, default=Latency.embed_dim)
-    parser.add_argument("--keep-alive", type=float, default=5.0,
-                        help="seconds an idle connection is kept open (uvicorn's default is 5); "
-                             "set low to make the client's stale-socket handling earn its keep")
-    parser.add_argument("--rpm", type=int, default=0,
-                        help="requests per minute allowed per model, then 429 until the minute "
-                             "ends (0 = unlimited)")
+    parser.add_argument(
+        "--keep-alive",
+        type=float,
+        default=5.0,
+        help="seconds an idle connection is kept open (uvicorn's default is 5); "
+        "set low to make the client's stale-socket handling earn its keep",
+    )
+    parser.add_argument(
+        "--rpm",
+        type=int,
+        default=0,
+        help="requests per minute allowed per model, then 429 until the minute "
+        "ends (0 = unlimited)",
+    )
     args = parser.parse_args()
-    for name in ("structured_ms", "toolcall_ms", "ttft_ms", "token_ms", "embed_ms", "jitter",
-                 "tokens", "embed_dim"):
+    for name in (
+        "structured_ms",
+        "toolcall_ms",
+        "ttft_ms",
+        "token_ms",
+        "embed_ms",
+        "jitter",
+        "tokens",
+        "embed_dim",
+    ):
         setattr(Latency, name, getattr(args, name))
     Quota.rpm = args.rpm
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning", access_log=False,
-                timeout_keep_alive=args.keep_alive)
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="warning",
+        access_log=False,
+        timeout_keep_alive=args.keep_alive,
+    )
 
 
 if __name__ == "__main__":

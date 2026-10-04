@@ -26,6 +26,7 @@ subject and no other — is `TeachingService`, checked by the route before this 
 Two modules because the question "is this a valid mark for this child" and the question "are
 you the person who may state it" have different answers and different failure modes.
 """
+
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -227,9 +228,9 @@ class MarkSheetService:
         into its own refusal naming its own field: "no such term" and "no such subject"
         are different mistakes and a caller fixes them differently.
         """
-        section_id = uow.class_sections.ids_for(
-            [(str(academic_year_code), str(class_code))]
-        ).get((str(academic_year_code), str(class_code)))
+        section_id = uow.class_sections.ids_for([(str(academic_year_code), str(class_code))]).get(
+            (str(academic_year_code), str(class_code))
+        )
         if section_id is None:
             raise UnknownReference(
                 f"no class {class_code} in academic year {academic_year_code}",
@@ -257,9 +258,7 @@ class MarkSheetService:
         )
 
     @staticmethod
-    def _roll(
-        uow: UnitOfWork, context: "_Context"
-    ) -> tuple[list[str], Mapping[str, Student]]:
+    def _roll(uow: UnitOfWork, context: "_Context") -> tuple[list[str], Mapping[str, Student]]:
         """The children whose class *for this term* is this one.
 
         Built by asking `resolve_sections_for_term` — the same function the report card
@@ -289,9 +288,7 @@ class MarkSheetService:
         if not candidates:
             return [], {}
 
-        resolved = resolve_sections_for_term(
-            uow.enrolments, candidates, context.term, context.year
-        )
+        resolved = resolve_sections_for_term(uow.enrolments, candidates, context.term, context.year)
         # Repositories return the domain ClassSection, whose stable identity is
         # (academic_year_code, code); it deliberately does not expose the database PK.
         # Comparing a non-existent `.id` made every real student disappear from the sheet.

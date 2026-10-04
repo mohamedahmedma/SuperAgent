@@ -12,6 +12,7 @@ is `alt_phone` on her own row. The primary phone is her identity (see
 people by definition; no name-matching can safely decide otherwise, and a service that
 tried would merge two families on a coincidence of spelling.
 """
+
 from dataclasses import dataclass
 
 from sis.domain.guardians import RelationshipType

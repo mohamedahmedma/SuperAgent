@@ -5,6 +5,7 @@ per batch. The store this replaced issued a SELECT and then an INSERT or UPDATE 
 chunk, so a document with a thousand parent chunks cost two thousand round trips, and two
 uploads of the same document could race between the SELECT and the INSERT.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -68,7 +69,9 @@ class SqlAlchemyParentChunkRepository:
     def get_many(self, chunk_ids: Sequence[str]) -> Sequence[ParentChunkRecord]:
         if not chunk_ids:
             return []
-        rows = self._session.execute(select(*_RECORD_COLUMNS).where(ParentChunk.chunk_id.in_(list(chunk_ids))))
+        rows = self._session.execute(
+            select(*_RECORD_COLUMNS).where(ParentChunk.chunk_id.in_(list(chunk_ids)))
+        )
         return [_record(row) for row in rows]
 
     def delete_by_filename(self, filename: str) -> Sequence[str]:

@@ -14,6 +14,7 @@ repeated full names, which is realistic â€” schools have three Ahmed Mohameds â€
 the case a roster screen has to handle without ambiguity, because the student number is
 what actually identifies a child.
 """
+
 from __future__ import annotations
 
 from typing import Final

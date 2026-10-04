@@ -16,6 +16,7 @@ administrator having to touch this service as well.
 
 **The children claim is best-effort and never blocks the sign-in.** See `_children_claim`.
 """
+
 from __future__ import annotations
 
 import logging
@@ -137,9 +138,7 @@ class ParentSessionService:
         if not guardian_external_id:
             return []
         try:
-            found = self._directory.children_of(
-                guardian_external_id, school_code=school_code
-            )
+            found = self._directory.children_of(guardian_external_id, school_code=school_code)
         except GuardianDirectoryUnavailable:
             logger.warning(
                 "Could not read this parent's children while minting a token; the token "

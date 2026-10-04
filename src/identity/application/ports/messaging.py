@@ -9,6 +9,7 @@ Narrow enough, too, that the transport is replaceable: nothing in `application/`
 WhatsApp except by the name of this port, and an SMS gateway satisfying it would need no
 change to any use case.
 """
+
 from __future__ import annotations
 
 from typing import Protocol

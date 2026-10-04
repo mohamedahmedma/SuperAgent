@@ -11,6 +11,7 @@ equality — a registrar key does **not** satisfy a reader check — so a report
 integration handed a registrar key "to unblock it" would silently gain the ability to
 rewrite a term's grades. Making the field required means somebody types the word.
 """
+
 from datetime import datetime
 from typing import Annotated, Protocol
 
@@ -24,11 +25,11 @@ from sis.api.deps import (
     require_registrar,
     require_user_permission,
 )
-from sis.domain.rbac import AccessProfile, Permission, RoleCode, ScopeType
-from sis.infrastructure.db import models as m
 from sis.api.routers import domain_errors, error_responses
 from sis.domain.access import AccessAttempt
 from sis.domain.auth import ApiKey, Scope
+from sis.domain.rbac import AccessProfile, Permission, RoleCode, ScopeType
+from sis.infrastructure.db import models as m
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
 AuditReader = Annotated[AccessProfile, Depends(require_user_permission(Permission.AUDIT_READ))]
@@ -162,8 +163,7 @@ class AccessAuditOut(BaseModel):
         "hers. The caller was told the same thing either way."
     )
     actor: str = Field(
-        description="The API key prefix that asked. Names a caller; cannot authenticate "
-        "as one."
+        description="The API key prefix that asked. Names a caller; cannot authenticate as one."
     )
     request_id: str = Field(
         description="Correlates back to the chat turn that caused this, when the caller "
@@ -251,6 +251,7 @@ def read_audit_log(
     """
     with uow_factory() as uow:
         from sqlalchemy import select
+
         statement = select(m.AuditLog).where(m.AuditLog.actor_user_id.is_not(None))
         if entity_type:
             statement = statement.where(m.AuditLog.entity_type == entity_type)
@@ -265,44 +266,69 @@ def read_audit_log(
                 row.id: row.school_id for row in uow._session.scalars(select(m.User)).all()
             }
             if reader.has_role(RoleCode.SCHOOL_MANAGER.value):
-                visible = [row for row in candidates if actor_school.get(row.actor_user_id) == reader.school_id]
+                visible = [
+                    row
+                    for row in candidates
+                    if actor_school.get(row.actor_user_id) == reader.school_id
+                ]
             else:
                 level_ids = {
-                    assignment.scope.id for assignment in reader.assignments
-                    if assignment.scope.type is ScopeType.YEAR_LEVEL and assignment.scope.id is not None
+                    assignment.scope.id
+                    for assignment in reader.assignments
+                    if assignment.scope.type is ScopeType.YEAR_LEVEL
+                    and assignment.scope.id is not None
                 }
                 assigned_section_ids = {
-                    assignment.scope.id for assignment in reader.assignments
-                    if assignment.scope.type is ScopeType.CLASS_SECTION and assignment.scope.id is not None
+                    assignment.scope.id
+                    for assignment in reader.assignments
+                    if assignment.scope.type is ScopeType.CLASS_SECTION
+                    and assignment.scope.id is not None
                 }
-                sections = uow._session.execute(
-                    select(m.ClassSection.id, m.ClassSection.code, m.AcademicYear.code)
-                    .join(m.AcademicYear, m.AcademicYear.id == m.ClassSection.academic_year_id)
-                    .where(
-                        (m.ClassSection.year_level_id.in_(level_ids))
-                        | (m.ClassSection.id.in_(assigned_section_ids))
-                    )
-                ).all() if level_ids or assigned_section_ids else []
+                sections = (
+                    uow._session.execute(
+                        select(m.ClassSection.id, m.ClassSection.code, m.AcademicYear.code)
+                        .join(m.AcademicYear, m.AcademicYear.id == m.ClassSection.academic_year_id)
+                        .where(
+                            (m.ClassSection.year_level_id.in_(level_ids))
+                            | (m.ClassSection.id.in_(assigned_section_ids))
+                        )
+                    ).all()
+                    if level_ids or assigned_section_ids
+                    else []
+                )
                 section_ids = {section_id for section_id, _class_code, _year_code in sections}
-                section_pairs = {(class_code, year_code) for _section_id, class_code, year_code in sections}
+                section_pairs = {
+                    (class_code, year_code) for _section_id, class_code, year_code in sections
+                }
 
                 def in_scope(entry: m.AuditLog) -> bool:
                     if actor_school.get(entry.actor_user_id) != reader.school_id:
                         return False
                     values = entry.new_values or entry.old_values or {}
-                    if values.get("year_level_id") in level_ids or values.get("class_section_id") in section_ids:
+                    if (
+                        values.get("year_level_id") in level_ids
+                        or values.get("class_section_id") in section_ids
+                    ):
                         return True
                     year = values.get("academic_year_code")
                     class_code = values.get("class_code")
-                    return bool(year and class_code and (str(class_code), str(year)) in section_pairs)
+                    return bool(
+                        year and class_code and (str(class_code), str(year)) in section_pairs
+                    )
 
                 visible = [row for row in candidates if in_scope(row)]
-            rows = visible[offset:offset + limit]
+            rows = visible[offset : offset + limit]
         actor_ids = {row.actor_user_id for row in rows if row.actor_user_id is not None}
-        people = {
-            row.id: row
-            for row in uow._session.scalars(select(m.User).where(m.User.id.in_(actor_ids))).all()
-        } if actor_ids else {}
+        people = (
+            {
+                row.id: row
+                for row in uow._session.scalars(
+                    select(m.User).where(m.User.id.in_(actor_ids))
+                ).all()
+            }
+            if actor_ids
+            else {}
+        )
         roles_by_actor: dict[int, list[str]] = {}
         if actor_ids:
             for user_id, role_name in uow._session.execute(
@@ -346,12 +372,22 @@ def read_audit_log(
                 context={
                     key: value
                     for key, value in (entry.new_values or entry.old_values or {}).items()
-                    if key in {
-                        "academic_year_code", "class_code", "subject_code", "term_code",
-                        "title", "details", "original_filename", "student_number", "staff_number",
+                    if key
+                    in {
+                        "academic_year_code",
+                        "class_code",
+                        "subject_code",
+                        "term_code",
+                        "title",
+                        "details",
+                        "original_filename",
+                        "student_number",
+                        "staff_number",
                     }
-                } or None,
+                }
+                or None,
             )
+
         # SQLAlchemy expires ORM fields when this unit of work closes. Serialize while
         # the session is still open so an audit page with real rows cannot turn into a
         # detached-instance 500 response.

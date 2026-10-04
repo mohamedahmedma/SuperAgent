@@ -2,13 +2,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from backend.api.deps import conversation_storage, get_services
-from backend.api.routes.attachments import attachment_info
 from backend.agent.chat.assets_bridge import restore_session_assets
 from backend.agent.chat.storage import ConversationStorage
-from backend.composition import Services
-from backend.db.models import User
-from backend.infra.auth import get_current_user
 from backend.agent.schemas import (
     MessageInfo,
     SessionDeleteResponse,
@@ -16,6 +11,11 @@ from backend.agent.schemas import (
     SessionListResponse,
     SessionMessagesResponse,
 )
+from backend.api.deps import conversation_storage, get_services
+from backend.api.routes.attachments import attachment_info
+from backend.composition import Services
+from backend.db.models import User
+from backend.infra.auth import get_current_user
 
 router = APIRouter(tags=["sessions"])
 
@@ -85,7 +85,9 @@ async def list_sessions(
     conversations: ConversationStorage = Depends(conversation_storage),
 ):
     try:
-        sessions = [SessionInfo(**item) for item in conversations.list_session_infos(current_user.username)]
+        sessions = [
+            SessionInfo(**item) for item in conversations.list_session_infos(current_user.username)
+        ]
         sessions.sort(key=lambda x: x.updated_at, reverse=True)
         return SessionListResponse(sessions=sessions)
     except Exception as e:

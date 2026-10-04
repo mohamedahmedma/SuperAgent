@@ -9,6 +9,7 @@ as it did before profiles existed, and so a single container can be re-tuned wit
 editing a packaged YAML file. Profiles express *what a domain is*; env expresses
 *how this one deployment is dialled in*.
 """
+
 from __future__ import annotations
 
 import copy
@@ -19,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from backend.agent.profiles.schema import DomainProfile
+from backend.profiles.schema import DomainProfile
 
 logger = logging.getLogger(__name__)
 
@@ -158,9 +159,7 @@ def _inheritance_chain(name: str) -> List[str]:
 
     while current:
         if current in seen:
-            raise ProfileError(
-                f"Circular profile inheritance: {' -> '.join([*chain, current])}"
-            )
+            raise ProfileError(f"Circular profile inheritance: {' -> '.join([*chain, current])}")
         if len(chain) >= _MAX_INHERITANCE_DEPTH:
             raise ProfileError(
                 f"Profile inheritance deeper than {_MAX_INHERITANCE_DEPTH}: {' -> '.join(chain)}"
@@ -263,10 +262,10 @@ def _apply_env_overrides(data: Dict[str, Any], profile: DomainProfile) -> Dict[s
 
 
 #: Prompt text a profile can carry, and the pack template each field is loaded from.
-#: Dotted path -> filename under `backend/agent/prompts/templates/packs/<profile>/`.
+#: Dotted path -> filename under `backend/prompts/templates/packs/<profile>/`.
 #:
 #: These are the last prompts that still lived in profile YAML. Everything else already
-#: reaches its template through `backend.agent.prompts.resolve`; see that module's docstring
+#: reaches its template through `backend.prompts.resolve`; see that module's docstring
 #: for why a profile answers "what is this deployment" and a prompt answers "how does
 #: the system talk", and why only the first belongs in YAML.
 PROMPT_PACK_FIELDS: Dict[str, str] = {
@@ -302,7 +301,7 @@ def _apply_prompt_packs(data: Dict[str, Any], chain: List[str]) -> Dict[str, Any
 
     YAML still wins. A deployment that has already tuned a prompt in its profile keeps
     that text and never notices the pack exists — the same reversibility
-    `backend.agent.prompts.resolve` promises for every other prompt.
+    `backend.prompts.resolve` promises for every other prompt.
 
     Rendered through the Jinja environment rather than read as bytes, so a pack is a
     template like every other prompt in that folder: comments are stripped, and the
@@ -312,7 +311,7 @@ def _apply_prompt_packs(data: Dict[str, Any], chain: List[str]) -> Dict[str, Any
     profile that ships none at all falls through to the schema defaults exactly as it
     did before packs existed.
     """
-    from backend.agent.prompts import TEMPLATE_ROOT, render
+    from backend.prompts import TEMPLATE_ROOT, render
 
     result = copy.deepcopy(data)
     for dotted, filename in PROMPT_PACK_FIELDS.items():

@@ -15,6 +15,7 @@ status code exists. The mapping from error to status lives in the API layer, bec
 the same `DuplicateCode` is a 409 to a registrar and a rejected row inside an import --
 one error, two renderings.
 """
+
 from typing import ClassVar
 
 

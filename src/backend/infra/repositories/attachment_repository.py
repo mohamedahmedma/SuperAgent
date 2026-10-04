@@ -4,6 +4,7 @@ Every lookup joins the owner in, the way `SqlAlchemyConversationRepository` does
 attachment is addressed by (username, id), never by id alone, so one parent's recording
 cannot be read through a URL that happens to carry its id.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

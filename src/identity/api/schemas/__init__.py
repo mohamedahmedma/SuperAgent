@@ -4,6 +4,7 @@ Split out of a single `schemas.py` so that a change to the WhatsApp flow touches
 WhatsApp schema and nothing else, and so the admin shapes — the ones that can bind a
 guardian — sit apart from the public ones.
 """
+
 from identity.api.schemas.admin import AccountIn, AccountOut, GuardianBindingIn
 from identity.api.schemas.auth import (
     AccessTokenOut,

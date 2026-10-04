@@ -16,6 +16,7 @@ scoped to the app object the test is holding, so a suite that forgets to undo it
 change what a later suite sees. The old globals could, and the ordering failures that
 produced are what `identity/infrastructure/db/session.py` documents at length.
 """
+
 import os
 import tempfile
 
@@ -66,6 +67,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from identity.app import app  # noqa: E402
 from identity.config import reset_settings  # noqa: E402
+from identity.domain.schools import SchoolRegistry  # noqa: E402
 from identity.infrastructure.db.base import Base  # noqa: E402
 from identity.infrastructure.db.session import (  # noqa: E402
     get_engine,
@@ -77,8 +79,6 @@ from identity.infrastructure.whatsapp.channels import WhatsAppChannels  # noqa: 
 from identity.infrastructure.whatsapp.gateways import (  # noqa: E402
     RecordingWhatsAppGateway,
 )
-from identity.domain.schools import SchoolRegistry  # noqa: E402
-
 
 
 def use_setting(monkeypatch, name: str, value: str) -> None:
@@ -92,7 +92,6 @@ def use_setting(monkeypatch, name: str, value: str) -> None:
     """
     monkeypatch.setenv(name, value)
     reset_settings()
-
 
 
 @pytest.fixture(autouse=True)
@@ -224,7 +223,11 @@ def parent(client, admin_headers):
     client.post(
         "/v1/admin/accounts",
         headers=admin_headers,
-        json={"username": "0501234567", "password": "correct-horse-battery", "display_name": "Umm Layla"},
+        json={
+            "username": "0501234567",
+            "password": "correct-horse-battery",
+            "display_name": "Umm Layla",
+        },
     )
     client.put(
         "/v1/admin/accounts/0501234567/guardian-binding",

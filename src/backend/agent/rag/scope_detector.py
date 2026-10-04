@@ -19,23 +19,24 @@ and this needs to be a guarantee:
   * disclosing a personal detail overrides a rejection — someone answering "he is 9" is
     continuing a conversation, not changing the subject
 """
+
 from __future__ import annotations
 
 import logging
 import threading
 from typing import Any, Dict, List, Optional, Sequence
+from typing import List as _List
+from typing import Literal as _Literal
 
 import numpy as np
-
-from backend.agent.chat.signals import RequestSignals, Scope
-from backend.llm import sampling
-from backend.agent.rag.evidence import Certainty
-from backend.agent.rag.scope_index import ScopeIndex, ScopeMatch, build_index
-from backend.text_normalization import normalize_query
-from typing import List as _List, Literal as _Literal
 from pydantic import Field
 
+from backend.agent.chat.signals import RequestSignals, Scope
+from backend.agent.rag.evidence import Certainty
+from backend.agent.rag.scope_index import ScopeIndex, ScopeMatch, build_index
+from backend.llm import sampling
 from backend.structured_output import StructuredOutput
+from backend.text_normalization import normalize_query
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def _default_builder() -> ScopeIndex:
 
     from backend.composition import default_services
     from backend.indexing.section_summary import corpus_catalogue
-    from backend.agent.profiles import get_profile
+    from backend.profiles import get_profile
 
     profile = get_profile()
     section_catalogue = default_services().section_catalogue
@@ -241,13 +242,12 @@ def _default_scope_invoke(ctx, signals: RequestSignals) -> Optional[Dict[str, An
     from langchain.chat_models import init_chat_model
 
     from backend.assets.vision import invoke_structured
-    from backend.agent.prompts import render
-    from backend.agent.profiles import get_profile
     from backend.composition import default_services
+    from backend.profiles import get_profile
+    from backend.prompts import render
 
     profile = get_profile()
     personal_fields = list(getattr(ctx.config, "personal_data_fields", None) or [])
-
 
     index = index_store.get()
     prompt = render(
@@ -404,9 +404,7 @@ def distinct_directions(
         if max_score_gap > 0 and (best - match.score) > max_score_gap:
             continue
         unit = _unit_vector(match.vector)
-        if unit is not None and any(
-            float(unit @ other) >= duplicate_similarity for other in kept
-        ):
+        if unit is not None and any(float(unit @ other) >= duplicate_similarity for other in kept):
             continue
         seen.add(question)
         if unit is not None:

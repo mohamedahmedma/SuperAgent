@@ -145,9 +145,7 @@ class GradesAnswerBlock(_AnswerBlockBase):
     data: GradesBlockData
 
 
-AnswerBlock = Annotated[
-    Union[TimetableAnswerBlock, GradesAnswerBlock], Field(discriminator="kind")
-]
+AnswerBlock = Annotated[Union[TimetableAnswerBlock, GradesAnswerBlock], Field(discriminator="kind")]
 _ANSWER_BLOCK = TypeAdapter(AnswerBlock)
 
 
@@ -399,9 +397,7 @@ class PendingHitlState(StrictSchema):
     prompt: str = Field(min_length=1)
     options: List[str] = Field(default_factory=list)
     route: Literal["clarify", "scope_select", "child_select"]
-    retrieval_status: Literal[
-        "needs_clarification", "needs_scope_selection", "needs_child_choice"
-    ]
+    retrieval_status: Literal["needs_clarification", "needs_scope_selection", "needs_child_choice"]
     answers: List[str] = Field(default_factory=list)
     resume_state: Optional[HitlResumeState] = None
     created_at: str

@@ -5,6 +5,7 @@ never name a guardian, and that every failure produces a refusal rather than an
 invented figure. The authorisation itself is tested in `records/tests` — this file
 covers the relay and the wording it hands back to the model.
 """
+
 import pytest
 import requests
 
@@ -48,9 +49,7 @@ def _ctx(guardian_id: str = "G-1", token: str = PARENT_TOKEN) -> ChatRequestCont
     return ChatRequestContext(
         user_id="user-1",
         session_id="turn-1",
-        caller=CallerIdentity(
-            user_id="user-1", guardian_id=guardian_id, guardian_token=token
-        ),
+        caller=CallerIdentity(user_id="user-1", guardian_id=guardian_id, guardian_token=token),
     )
 
 
@@ -68,7 +67,10 @@ def _route(responses: dict):
 
 ONE_CHILD = _Response(
     200,
-    {"guardian_id": "G-1", "students": [{"student_id": "S-1", "full_name_ar": "ليلى", "full_name_en": "Layla"}]},
+    {
+        "guardian_id": "G-1",
+        "students": [{"student_id": "S-1", "full_name_ar": "ليلى", "full_name_en": "Layla"}],
+    },
 )
 TWO_CHILDREN = _Response(
     200,
@@ -136,7 +138,9 @@ def test_expired_identity_is_not_reported_as_missing_records(monkeypatch):
 
 def test_no_linked_students_does_not_name_anyone(monkeypatch):
     monkeypatch.setattr(
-        records_http, "get", _route({"/students": _Response(200, {"guardian_id": "G-1", "students": []})})
+        records_http,
+        "get",
+        _route({"/students": _Response(200, {"guardian_id": "G-1", "students": []})}),
     )
     result = make_get_student_grades(_ctx()).invoke({})
 
@@ -458,7 +462,7 @@ def test_tomorrow_is_resolved_from_the_school_s_clock_and_stated_as_settled(
 
 
 def test_a_day_the_school_does_not_open_is_not_reported_as_having_no_lessons(monkeypatch):
-    """"There is no school on Friday" and "no lessons are recorded" are different facts.
+    """ "There is no school on Friday" and "no lessons are recorded" are different facts.
 
     The second is the plausible sentence and the false one — it describes a school day
     with an empty grid. This school's week is Saturday to Monday, so Friday is not one.
@@ -531,9 +535,7 @@ def test_an_unpublished_week_stays_unpublished_when_a_day_is_asked_for(monkeypat
     monkeypatch.setattr(
         records_http,
         "get",
-        _route(
-            {"/students": ONE_CHILD, "/timetable": _week(status="no_timetable", lessons=[])}
-        ),
+        _route({"/students": ONE_CHILD, "/timetable": _week(status="no_timetable", lessons=[])}),
     )
     result = make_get_student_timetable(_ctx()).invoke({"day": "بكره"})
 
@@ -558,9 +560,7 @@ def test_the_narrowed_day_is_drawn_as_an_ordinary_timetable_block(monkeypatch):
     data = block["data"]
     assert _passes_the_contract("timetable", data)
     assert [day["day"] for day in data["days"]] == ["saturday"]
-    assert data["days"][0]["slots"] == [
-        {"period": 1, "subject": "الرياضيات", "is_free": False}
-    ]
+    assert data["days"][0]["slots"] == [{"period": 1, "subject": "الرياضيات", "is_free": False}]
     # The whole school day still travels, breaks included: a client draws the day around
     # the lessons, and that does not change because only one day is in the payload.
     assert [(p["number"], p["is_teaching"]) for p in data["periods"]] == [(1, True), (2, False)]
@@ -660,13 +660,26 @@ def test_the_week_also_travels_as_data_a_client_can_draw(monkeypatch):
 
 def test_the_drawn_week_rings_at_the_minute_and_speaks_the_turn_s_language(monkeypatch):
     periods = [
-        {"period_number": 2, "name_ar": "فسحة", "name_en": "Break",
-         "starts_at": "08:30:00", "ends_at": "08:50:00", "is_teaching": False},
-        {"period_number": 1, "name_ar": "حصة ١", "name_en": "Period 1",
-         "starts_at": "07:45:00", "ends_at": "08:30:00", "is_teaching": True},
+        {
+            "period_number": 2,
+            "name_ar": "فسحة",
+            "name_en": "Break",
+            "starts_at": "08:30:00",
+            "ends_at": "08:50:00",
+            "is_teaching": False,
+        },
+        {
+            "period_number": 1,
+            "name_ar": "حصة ١",
+            "name_en": "Period 1",
+            "starts_at": "07:45:00",
+            "ends_at": "08:30:00",
+            "is_teaching": True,
+        },
     ]
     monkeypatch.setattr(
-        records_http, "get",
+        records_http,
+        "get",
         _route({"/students": ONE_CHILD, "/timetable": _week(periods=periods)}),
     )
     ctx = _ctx()
@@ -676,7 +689,8 @@ def test_the_drawn_week_rings_at_the_minute_and_speaks_the_turn_s_language(monke
 
     # In the day's own order, whatever order they arrived in, and without seconds.
     assert [(p["number"], p["starts_at"], p["ends_at"]) for p in data["periods"]] == [
-        (1, "07:45", "08:30"), (2, "08:30", "08:50"),
+        (1, "07:45", "08:30"),
+        (2, "08:30", "08:50"),
     ]
     assert data["periods"][1]["label"] == "فسحة"
     assert [day["label"] for day in data["days"]] == ["السبت", "الأحد"]
@@ -685,11 +699,14 @@ def test_the_drawn_week_rings_at_the_minute_and_speaks_the_turn_s_language(monke
 def test_no_week_means_no_table_to_draw(monkeypatch):
     """`no_class` arrives through the timetable outcome, and its empty grid is not a table."""
     monkeypatch.setattr(
-        records_http, "get",
-        _route({
-            "/students": ONE_CHILD,
-            "/timetable": _week(status="no_class", class_code="", lessons=[], days=[]),
-        }),
+        records_http,
+        "get",
+        _route(
+            {
+                "/students": ONE_CHILD,
+                "/timetable": _week(status="no_class", class_code="", lessons=[], days=[]),
+            }
+        ),
     )
     ctx = _ctx()
     make_get_student_timetable(ctx).invoke({})
@@ -697,17 +714,34 @@ def test_no_week_means_no_table_to_draw(monkeypatch):
 
 
 def test_the_marks_also_travel_as_data_and_a_blank_grade_stays_blank(monkeypatch):
-    grades = _Response(200, {
-        "term": {"term_id": "2026-T1", "name_ar": "الفصل الأول"},
-        "courses": [
-            {"course_id": "9001", "subject_name_ar": "الرياضيات", "subject_name_en": "Mathematics",
-             "computed_percentage": 91.0, "letter_grade": "A", "excused_count": 0,
-             "missing_count": 0, "is_complete": True},
-            {"course_id": "9002", "subject_name_ar": "العلوم", "subject_name_en": "Science",
-             "computed_percentage": None, "letter_grade": "", "excused_count": 0,
-             "missing_count": 2, "is_complete": False},
-        ],
-    })
+    grades = _Response(
+        200,
+        {
+            "term": {"term_id": "2026-T1", "name_ar": "الفصل الأول"},
+            "courses": [
+                {
+                    "course_id": "9001",
+                    "subject_name_ar": "الرياضيات",
+                    "subject_name_en": "Mathematics",
+                    "computed_percentage": 91.0,
+                    "letter_grade": "A",
+                    "excused_count": 0,
+                    "missing_count": 0,
+                    "is_complete": True,
+                },
+                {
+                    "course_id": "9002",
+                    "subject_name_ar": "العلوم",
+                    "subject_name_en": "Science",
+                    "computed_percentage": None,
+                    "letter_grade": "",
+                    "excused_count": 0,
+                    "missing_count": 2,
+                    "is_complete": False,
+                },
+            ],
+        },
+    )
     monkeypatch.setattr(records_http, "get", _route({"/students": ONE_CHILD, "/grades": grades}))
     ctx = _ctx()
     make_get_student_grades(ctx).invoke({})
@@ -716,8 +750,13 @@ def test_the_marks_also_travel_as_data_and_a_blank_grade_stays_blank(monkeypatch
     assert block["kind"] == "grades"
     assert _passes_the_contract("grades", block["data"])
     maths, science = block["data"]["courses"]
-    assert maths == {"subject": "الرياضيات", "percentage": 91.0, "letter": "A",
-                     "missing_count": 0, "in_progress": False}
+    assert maths == {
+        "subject": "الرياضيات",
+        "percentage": 91.0,
+        "letter": "A",
+        "missing_count": 0,
+        "in_progress": False,
+    }
     # A blank grade is never 0 — not in the text, and not in the data a bar is drawn from.
     assert science["percentage"] is None
     assert science["missing_count"] == 2

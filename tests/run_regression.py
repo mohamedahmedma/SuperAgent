@@ -39,6 +39,7 @@ tens of seconds — so this is the pre-merge check, not the inner loop. Use
 Exit status is 0 only if every selected suite passed. Anything else is a build that
 should not ship.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -110,7 +111,7 @@ def main() -> int:
     argv = sys.argv[1:]
     if "--" in argv:
         cut = argv.index("--")
-        argv, passthrough = argv[:cut], argv[cut + 1:]
+        argv, passthrough = argv[:cut], argv[cut + 1 :]
     else:
         passthrough = []
     options = parser.parse_args(argv)

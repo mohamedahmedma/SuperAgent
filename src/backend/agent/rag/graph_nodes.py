@@ -14,6 +14,7 @@ Behaviour is unchanged: every progress label, trace key and state update is the 
 function it replaces produced. The test suite asserts few of the graph's progress labels;
 a golden run over every branch, compared before and after, checked the rest.
 """
+
 import operator
 import re
 from typing import Annotated, List, Literal, Optional, Protocol, TypedDict
@@ -22,7 +23,6 @@ from langgraph.types import Send
 
 from backend.agent.chat.child_names import strip_child_names
 from backend.agent.chat.request_context import ChatRequestContext
-from backend.agent.prompts import resolve as resolve_prompt
 from backend.agent.rag.evidence import (
     AssessmentContext,
     Certainty,
@@ -38,6 +38,7 @@ from backend.agent.rag.policy import (
     select_evidence,
 )
 from backend.agent.schemas.chat import normalize_rag_sub_trace
+from backend.prompts import resolve as resolve_prompt
 
 
 class RAGState(TypedDict):
@@ -229,12 +230,16 @@ class RetrieveInitial:
             # rule `turn_policy.as_trace` states holds here too — report that a decision was
             # made, never what it was.
             emit(
-                state, "🙈", "Searching without the child's name",
+                state,
+                "🙈",
+                "Searching without the child's name",
                 "the corpus is the school's own material and names no pupil",
             )
         if state.get("carried_constraints"):
             emit(
-                state, "🧷", "Conditions carried from earlier turns",
+                state,
+                "🧷",
+                "Conditions carried from earlier turns",
                 "Applied when the answer is written, not to the search — "
                 + "; ".join(state["carried_constraints"]),
             )
@@ -244,7 +249,9 @@ class RetrieveInitial:
             # answer is still written from it, and the user is still replied to in their
             # own language — the same split `search_query` makes for the child's name.
             emit(
-                state, "🌐", "Searching in the corpus's language",
+                state,
+                "🌐",
+                "Searching in the corpus's language",
                 translation.get("query_translation_reason", ""),
             )
         retrieved = self._deps.retrieve_documents(
@@ -281,9 +288,18 @@ class RetrieveInitial:
                     f"Replaced chunks: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
                 ),
             )
-            emit(state, "✅", f"Retrieval complete, found {len(results)} snippets", f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
+            emit(
+                state,
+                "✅",
+                f"Retrieval complete, found {len(results)} snippets",
+                f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}",
+            )
             if not results:
-                emit(state, "⚠️", "No snippets available, proceeding to the evidence-grading short-circuit check")
+                emit(
+                    state,
+                    "⚠️",
+                    "No snippets available, proceeding to the evidence-grading short-circuit check",
+                )
         rag_trace = {
             "tool_used": True,
             "tool_name": "search_knowledge_base",
@@ -430,7 +446,9 @@ class GradeDocuments:
         """Flatten a report plus its route into the trace fields the rest of the system
         already reads. Names are unchanged so the frontend and any integrating client keep
         working; `evidence_certainty` and `evidence_assessed_by` are additive."""
-        hitl_prompt = self.default_hitl_prompt(route, report) if route in ("clarify", "scope_select") else ""
+        hitl_prompt = (
+            self.default_hitl_prompt(route, report) if route in ("clarify", "scope_select") else ""
+        )
         # The grader's own list wins when it wrote one. The catalogued directions are the
         # fallback, and on a scope_select routed BY those directions they are the only list
         # there is — a scope_select with no options is never asked, so without this the
@@ -456,12 +474,19 @@ class GradeDocuments:
             # A backend outage says nothing about what the KB contains, so this must not
             # reach an assessor or surface as no_knowledge. Static short-circuit only.
             rag_trace = state.get("rag_trace", {}) or {}
-            rag_trace.update({
-                "retrieval_status": "retrieval_error",
-                "route": "retrieval_error",
-                "evidence_reason": "knowledge_base_unreachable",
-            })
-            emit(state, "\U0001f6a7", "Retrieval failed, returning a static retry notice", "Not treated as missing knowledge")
+            rag_trace.update(
+                {
+                    "retrieval_status": "retrieval_error",
+                    "route": "retrieval_error",
+                    "evidence_reason": "knowledge_base_unreachable",
+                }
+            )
+            emit(
+                state,
+                "\U0001f6a7",
+                "Retrieval failed, returning a static retry notice",
+                "Not treated as missing knowledge",
+            )
             return {
                 "route": "retrieval_error",
                 "retrieval_status": "retrieval_error",
@@ -485,7 +510,9 @@ class GradeDocuments:
             # A local view, so assessment reads the set it is judging.
             state = {**state, "docs": docs}
             emit(
-                state, "\U0001f9ee", f"Judging {len(docs)} of {len(retrieved)} chunks",
+                state,
+                "\U0001f9ee",
+                f"Judging {len(docs)} of {len(retrieved)} chunks",
                 evidence_reason,
             )
         if docs:
@@ -519,11 +546,26 @@ class GradeDocuments:
 
         if route == "answer":
             if report.sufficiency == "partial":
-                emit(state, "\U0001f7e1", "Keeping partially relevant evidence", f"Confidence: {report.confidence:.2f}")
+                emit(
+                    state,
+                    "\U0001f7e1",
+                    "Keeping partially relevant evidence",
+                    f"Confidence: {report.confidence:.2f}",
+                )
             else:
-                emit(state, "✅", "Evidence sufficient, returning retrieved snippets", f"Confidence: {report.confidence:.2f}")
+                emit(
+                    state,
+                    "✅",
+                    "Evidence sufficient, returning retrieved snippets",
+                    f"Confidence: {report.confidence:.2f}",
+                )
         elif route == "rewrite":
-            emit(state, "⚠️", "Evidence insufficient, will rewrite the query once", f"Confidence: {report.confidence:.2f}")
+            emit(
+                state,
+                "⚠️",
+                "Evidence insufficient, will rewrite the query once",
+                f"Confidence: {report.confidence:.2f}",
+            )
         elif route in ("clarify", "scope_select"):
             emit(state, "❓", "Needs more information from the user", report_update["hitl_prompt"])
         elif route == "retrieval_error":
@@ -573,7 +615,10 @@ class GradeDocuments:
             if keep:
                 kept = [docs[i - 1] for i in keep]
                 emit(
-                    state, "✂️", f"Sending {len(kept)} of {len(docs)} chunks to the model", reason,
+                    state,
+                    "✂️",
+                    f"Sending {len(kept)} of {len(docs)} chunks to the model",
+                    reason,
                 )
                 update.update({"docs": kept, "context": format_docs(kept)})
                 # retrieved_chunks has to match what the answer was built from: citation
@@ -609,11 +654,13 @@ class RewriteQuestion:
         docs = state.get("docs") or []
         status = "partial" if docs else "no_knowledge"
         rag_trace = state.get("rag_trace", {}) or {}
-        rag_trace.update({
-            "retrieval_status": status,
-            "route": "answer" if docs else "no_knowledge",
-            "evidence_reason": reason,
-        })
+        rag_trace.update(
+            {
+                "retrieval_status": status,
+                "route": "answer" if docs else "no_knowledge",
+                "evidence_reason": reason,
+            }
+        )
         if not docs:
             rag_trace["retrieved_chunks"] = []
         emit(state, "⚠️" if docs else "⛔", label, detail)
@@ -657,14 +704,21 @@ class RewriteQuestion:
         rewritten_query = (rewrite.get("rewritten_query") or "").strip()
 
         method_label = "Step-back" if rewrite_method == "step_back" else "HyDE"
-        emit(state, "✅", f"Selected {method_label} rewrite", "Only this rewrite method will run this round")
+        emit(
+            state,
+            "✅",
+            f"Selected {method_label} rewrite",
+            "Only this rewrite method will run this round",
+        )
 
         rag_trace = state.get("rag_trace", {}) or {}
-        rag_trace.update({
-            "rewrite_method": rewrite_method,
-            "rewritten_query": rewritten_query,
-            "rewrite_count": rewrite_count + 1,
-        })
+        rag_trace.update(
+            {
+                "rewrite_method": rewrite_method,
+                "rewritten_query": rewritten_query,
+                "rewrite_count": rewrite_count + 1,
+            }
+        )
         if step_back_question:
             rag_trace["step_back_question"] = step_back_question
         if hyde_document:
@@ -768,25 +822,32 @@ class RetrieveRewritten:
                 f"{len(merged) - len(results)} kept from the first pass",
             )
         rag_trace = state.get("rag_trace", {}) or {}
-        rag_trace.update({
-            "rewrite_method": rewrite_method,
-            "rewritten_query": rewritten_query,
-            "retrieved_chunks": merged,
-            # The rewritten pass ALONE, so a trace still shows what the rewrite itself
-            # found rather than the union it was folded into.
-            "rewrite_retrieved_chunks": results,
-            # Recorded even though the turn carries on, because "answered from the first
-            # pass because the retry could not run" is a different fact from "answered
-            # from the first pass because the retry found nothing new".
-            "rewrite_retrieval_failed": rewrite_failed,
-            "retrieval_stage": "rewritten",
-            **self._deps.retrieval_trace_fields(retrieve_meta),
-        })
+        rag_trace.update(
+            {
+                "rewrite_method": rewrite_method,
+                "rewritten_query": rewritten_query,
+                "retrieved_chunks": merged,
+                # The rewritten pass ALONE, so a trace still shows what the rewrite itself
+                # found rather than the union it was folded into.
+                "rewrite_retrieved_chunks": results,
+                # Recorded even though the turn carries on, because "answered from the first
+                # pass because the retry could not run" is a different fact from "answered
+                # from the first pass because the retry found nothing new".
+                "rewrite_retrieval_failed": rewrite_failed,
+                "retrieval_stage": "rewritten",
+                **self._deps.retrieval_trace_fields(retrieve_meta),
+            }
+        )
         if state.get("step_back_question"):
             rag_trace["step_back_question"] = state["step_back_question"]
         if state.get("hyde_document"):
             rag_trace["hyde_document"] = state["hyde_document"]
-        return {"docs": merged, "context": context, "retrieval_failed": retrieval_failed, "rag_trace": rag_trace}
+        return {
+            "docs": merged,
+            "context": context,
+            "retrieval_failed": retrieval_failed,
+            "rag_trace": rag_trace,
+        }
 
 
 class ClassifyComplexity:
@@ -857,16 +918,16 @@ class ClassifyComplexity:
         if not model:
             raise RuntimeError("FAST_MODEL is required for complexity planning")
 
-        prompt = resolve_prompt(self._deps.complexity_prompt, "rag/complexity.j2", question=question)
+        prompt = resolve_prompt(
+            self._deps.complexity_prompt, "rag/complexity.j2", question=question
+        )
         result = model.with_structured_output(self._deps.complexity_schema).invoke(
             [{"role": "user", "content": prompt}]
         )
         complexity = (result.complexity or "simple").strip().lower()
         reason = (result.reason or "").strip()
         sub_questions = [
-            item.strip()
-            for item in (result.sub_questions or [])
-            if item and item.strip()
+            item.strip() for item in (result.sub_questions or []) if item and item.strip()
         ][: self._deps.config.max_sub_questions]
         if complexity not in ("simple", "complex"):
             raise ValueError(f"Unsupported complexity result: {complexity}")
@@ -874,9 +935,19 @@ class ClassifyComplexity:
             raise ValueError("Complexity planner returned no sub-questions")
 
         if complexity == "simple":
-            emit(state, "✅", "Simple question → using the standard RAG flow", f"Reason: {reason[:60]}")
+            emit(
+                state,
+                "✅",
+                "Simple question → using the standard RAG flow",
+                f"Reason: {reason[:60]}",
+            )
         else:
-            emit(state, "🔀", "Complex question → decomposing into sub-questions for parallel retrieval", f"Reason: {reason[:60]}")
+            emit(
+                state,
+                "🔀",
+                "Complex question → decomposing into sub-questions for parallel retrieval",
+                f"Reason: {reason[:60]}",
+            )
 
         return {
             "complexity": complexity,
@@ -890,9 +961,7 @@ class PrepareSubQuestions:
 
     def __call__(self, state: RAGState) -> RAGState:
         planned_sub_questions = [
-            item.strip()
-            for item in (state.get("sub_questions") or [])
-            if item and item.strip()
+            item.strip() for item in (state.get("sub_questions") or []) if item and item.strip()
         ]
         for i, sq in enumerate(planned_sub_questions, 1):
             emit(state, "📌", f"Sub-question {i}", f"{sq[:80]} added to parallel retrieval")
@@ -937,13 +1006,16 @@ class RagSubAgent:
         result.update(self._grade(result))
         trace = result.get("rag_trace") or {}
         return {
-            "sub_results": [{
-                "question": question,
-                "docs": result.get("docs", []),
-                "retrieval_status": result.get("retrieval_status") or trace.get("retrieval_status"),
-                "route": result.get("route") or trace.get("route"),
-                "rag_trace": trace,
-            }],
+            "sub_results": [
+                {
+                    "question": question,
+                    "docs": result.get("docs", []),
+                    "retrieval_status": result.get("retrieval_status")
+                    or trace.get("retrieval_status"),
+                    "route": result.get("route") or trace.get("route"),
+                    "rag_trace": trace,
+                }
+            ],
         }
 
 
@@ -991,7 +1063,9 @@ class Synthesis:
     def __call__(self, state: RAGState) -> RAGState:
         """Merges all documents retrieved by the sub-agents, dedupes and ranks them, and outputs the final context."""
         sub_results = state.get("sub_results", [])
-        emit(state, "🔬", f"Synthesizing retrieval results from {len(sub_results)} sub-questions...")
+        emit(
+            state, "🔬", f"Synthesizing retrieval results from {len(sub_results)} sub-questions..."
+        )
 
         all_docs: List[dict] = []
         for result in sub_results:
@@ -1015,7 +1089,12 @@ class Synthesis:
         if deduped:
             emit(state, "✅", f"Synthesis complete, {len(deduped)} deduplicated snippets total")
         elif retrieval_outage:
-            emit(state, "🚧", "Knowledge base temporarily unreachable for the sub-questions", "Returning a static retry notice")
+            emit(
+                state,
+                "🚧",
+                "Knowledge base temporarily unreachable for the sub-questions",
+                "Returning a static retry notice",
+            )
         else:
             emit(state, "⛔", "None of the sub-questions had usable evidence")
 
@@ -1036,7 +1115,8 @@ class Synthesis:
         if retrieval_outage:
             retrieval_status = "retrieval_error"
         hitl_traces = [
-            trace for trace in sub_traces
+            trace
+            for trace in sub_traces
             if trace.get("retrieval_status") in ("needs_clarification", "needs_scope_selection")
         ]
         hitl_route = None
@@ -1045,16 +1125,20 @@ class Synthesis:
         # Outage outranks HITL: asking the user to clarify can't fix an unreachable backend.
         if not has_docs and not retrieval_outage and hitl_traces:
             scope_trace = next(
-                (trace for trace in hitl_traces if trace.get("retrieval_status") == "needs_scope_selection"),
+                (
+                    trace
+                    for trace in hitl_traces
+                    if trace.get("retrieval_status") == "needs_scope_selection"
+                ),
                 None,
             )
             chosen_trace = scope_trace or hitl_traces[0]
             retrieval_status = chosen_trace.get("retrieval_status") or "needs_clarification"
-            hitl_route = "scope_select" if retrieval_status == "needs_scope_selection" else "clarify"
+            hitl_route = (
+                "scope_select" if retrieval_status == "needs_scope_selection" else "clarify"
+            )
             prompts = [
-                trace.get("hitl_prompt")
-                for trace in hitl_traces
-                if trace.get("hitl_prompt")
+                trace.get("hitl_prompt") for trace in hitl_traces if trace.get("hitl_prompt")
             ]
             hitl_prompt = "; ".join(dict.fromkeys(prompts))
             for trace in hitl_traces:
@@ -1103,7 +1187,12 @@ class ResumeRetrieval:
         self._grade = grade
 
     def __call__(self, state: dict) -> dict:
-        emit(state, "🔎", "Running targeted retrieval using the HITL follow-up", "Skipping complexity classification and sub-question decomposition")
+        emit(
+            state,
+            "🔎",
+            "Running targeted retrieval using the HITL follow-up",
+            "Skipping complexity classification and sub-question decomposition",
+        )
         query = search_query(state)
         search_text, translation = self._deps.translate_for_search(query)
         retrieved = self._deps.retrieve_documents(
@@ -1140,28 +1229,37 @@ class ResumeRetrieval:
                     f"Replaced chunks: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
                 ),
             )
-            emit(state, "✅", f"HITL targeted retrieval complete, found {len(results)} snippets", f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
+            emit(
+                state,
+                "✅",
+                f"HITL targeted retrieval complete, found {len(results)} snippets",
+                f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}",
+            )
         rag_trace = state.get("rag_trace") or {}
-        rag_trace.update({
-            "tool_used": True,
-            "tool_name": "search_knowledge_base",
-            "query": query,
-            "retrieved_chunks": results,
-            "hitl_targeted_retrieved_chunks": results,
-            "hitl_resumed": True,
-            "hitl_resume_strategy": "targeted_retrieval",
-            "retrieval_stage": "hitl_targeted_retrieval",
-            **translation,
-            **self._deps.retrieval_trace_fields(retrieve_meta),
-        })
-        state.update({
-            "query": query,
-            "search_text": search_text,
-            "docs": results,
-            "context": context,
-            "retrieval_failed": retrieval_failed,
-            "rag_trace": rag_trace,
-        })
+        rag_trace.update(
+            {
+                "tool_used": True,
+                "tool_name": "search_knowledge_base",
+                "query": query,
+                "retrieved_chunks": results,
+                "hitl_targeted_retrieved_chunks": results,
+                "hitl_resumed": True,
+                "hitl_resume_strategy": "targeted_retrieval",
+                "retrieval_stage": "hitl_targeted_retrieval",
+                **translation,
+                **self._deps.retrieval_trace_fields(retrieve_meta),
+            }
+        )
+        state.update(
+            {
+                "query": query,
+                "search_text": search_text,
+                "docs": results,
+                "context": context,
+                "retrieval_failed": retrieval_failed,
+                "rag_trace": rag_trace,
+            }
+        )
         state.update(self._grade(state))
         return state
 

@@ -25,6 +25,7 @@ rung is re-parented — and an authorisation decision made against last week's l
 one kind of stale read that must not happen. Within a single request the memo below is
 safe, because a request is answered inside one transaction.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -48,9 +49,7 @@ class ScopeResolver:
     session: Session
     _memo: dict[tuple[str, ...], Target] = field(default_factory=dict, repr=False)
     #: Lookups that answer with several places at once — see `for_student`.
-    _rooms: dict[tuple[str, ...], tuple[Target, ...]] = field(
-        default_factory=dict, repr=False
-    )
+    _rooms: dict[tuple[str, ...], tuple[Target, ...]] = field(default_factory=dict, repr=False)
 
     # -- The ladder ---------------------------------------------------------------
 
@@ -140,27 +139,23 @@ class ScopeResolver:
         if key in self._memo:
             return self._memo[key]
 
-        statement = select(m.YearLevel.id, m.YearLevel.educational_system_id, m.YearLevel.school_id).where(
-            m.YearLevel.code == str(year_level_code)
-        )
+        statement = select(
+            m.YearLevel.id, m.YearLevel.educational_system_id, m.YearLevel.school_id
+        ).where(m.YearLevel.code == str(year_level_code))
         if school_id is not None:
             statement = statement.where(m.YearLevel.school_id == int(school_id))
 
         rows = self.session.execute(statement).all()
         if len(rows) == 1:
             level_id, track_id, owning_school = rows[0]
-            target = Target(
-                school_id=owning_school, track_id=track_id, year_level_id=level_id
-            )
+            target = Target(school_id=owning_school, track_id=track_id, year_level_id=level_id)
         else:
             target = Target(school_id=school_id)
 
         self._memo[key] = target
         return target
 
-    def for_year_level_in_school(
-        self, *, school_code: str, year_level_code: str
-    ) -> Target:
+    def for_year_level_in_school(self, *, school_code: str, year_level_code: str) -> Target:
         """Resolve the requested grade inside the requested school.
 
         Using the caller's school id here would authorize their school's grade and then
@@ -169,9 +164,7 @@ class ScopeResolver:
         school_id = self.session.scalar(
             select(m.School.id).where(m.School.code == str(school_code))
         )
-        return self.for_year_level(
-            school_id=school_id, year_level_code=year_level_code
-        )
+        return self.for_year_level(school_id=school_id, year_level_code=year_level_code)
 
     def for_subject(self, *, academic_year_code: str, subject_code: str) -> Target:
         """A subject within one year. Names the school too, so a wider grant still covers it."""
@@ -196,9 +189,7 @@ class ScopeResolver:
         self._memo[key] = target
         return target
 
-    def for_student(
-        self, *, academic_year_code: str, student_number: str
-    ) -> tuple[Target, ...]:
+    def for_student(self, *, academic_year_code: str, student_number: str) -> tuple[Target, ...]:
         """Every room a child was placed in during one academic year, each fully located.
 
         A child is not a scope — nothing is ever granted "on Fatima" — so this answers with
@@ -252,9 +243,7 @@ class ScopeResolver:
         self._rooms[key] = found
         return found
 
-    def for_student_in_term(
-        self, *, term_code: str, student_number: str
-    ) -> tuple[Target, ...]:
+    def for_student_in_term(self, *, term_code: str, student_number: str) -> tuple[Target, ...]:
         """The same, for a route that names a term instead of a year.
 
         A term belongs to exactly one academic year, so this is that lookup followed by
@@ -270,9 +259,7 @@ class ScopeResolver:
         )
         if year_code is None:
             return (Target(),)
-        return self.for_student(
-            academic_year_code=year_code, student_number=student_number
-        )
+        return self.for_student(academic_year_code=year_code, student_number=student_number)
 
     def for_school(self, school_code: str | None) -> Target:
         """Just the school. What a listing route that names nothing narrower asks with."""
@@ -298,9 +285,7 @@ class ScopeResolver:
         key = ("year", academic_year_code)
         if key not in self._memo:
             found = self.session.scalar(
-                select(m.AcademicYear.school_id).where(
-                    m.AcademicYear.code == academic_year_code
-                )
+                select(m.AcademicYear.school_id).where(m.AcademicYear.code == academic_year_code)
             )
             self._memo[key] = Target(school_id=found)
         return self._memo[key].school_id

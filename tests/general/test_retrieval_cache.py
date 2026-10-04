@@ -1,4 +1,5 @@
 """RAG_FIX_PLAN item 18: a retrieval is reused until the corpus it searched changes."""
+
 import unittest
 import uuid
 
@@ -6,8 +7,15 @@ from backend.agent.rag.retrieval_cache import CorpusVersion, RetrievalCache
 from tests.general.test_turn_admission import _CLIENT, requires_redis
 
 RESULT = {
-    "docs": [{"text": "Fees are reviewed each year.", "filename": "fees.pdf", "score": 0.031,
-              "asset_ids": ["fees::img1"], "page_number": 2}],
+    "docs": [
+        {
+            "text": "Fees are reviewed each year.",
+            "filename": "fees.pdf",
+            "score": 0.031,
+            "asset_ids": ["fees::img1"],
+            "page_number": 2,
+        }
+    ],
     "meta": {"retrieval_mode": "hybrid", "retrieval_top_k": 5, "candidate_k": 20},
 }
 
@@ -26,8 +34,13 @@ class RetrievalCacheTests(unittest.TestCase):
         return f"{self.prefix}:{name}"
 
     def cache(self, fingerprint="settings-a"):
-        return RetrievalCache(redis=lambda: _CLIENT, key=self.key, corpus=self.corpus,
-                              fingerprint=fingerprint, ttl_seconds=60)
+        return RetrievalCache(
+            redis=lambda: _CLIENT,
+            key=self.key,
+            corpus=self.corpus,
+            fingerprint=fingerprint,
+            ttl_seconds=60,
+        )
 
     def test_a_stored_result_comes_back_as_it_went_in(self):
         cache = self.cache()
@@ -63,13 +76,17 @@ class RetrievalCacheTests(unittest.TestCase):
             ("fees", 5, 'chunk_level == 3 and filename not in ["fees_en.pdf"]', "settings-a"),
             ("fees", 5, "chunk_level == 3", "settings-b"),
         ):
-            with self.subTest(query=query, top_k=top_k, filter_expr=filter_expr, fingerprint=fingerprint):
+            with self.subTest(
+                query=query, top_k=top_k, filter_expr=filter_expr, fingerprint=fingerprint
+            ):
                 self.assertIsNone(self.cache(fingerprint).lookup(query, top_k, filter_expr)[0])
 
     def test_only_a_complete_search_is_kept(self):
         cache = self.cache()
-        for meta in ({"retrieval_mode": "failed", "retrieval_error": "embedding_failed"},
-                     {"retrieval_mode": "dense_fallback"}):
+        for meta in (
+            {"retrieval_mode": "failed", "retrieval_error": "embedding_failed"},
+            {"retrieval_mode": "dense_fallback"},
+        ):
             with self.subTest(meta=meta):
                 _, ticket = cache.lookup("fees", 5, "")
                 cache.store(ticket, {"docs": [], "meta": meta})
@@ -95,8 +112,9 @@ class RetrieveDocumentsTests(unittest.TestCase):
         self.prefix = f"test-rd-{uuid.uuid4().hex[:8]}"
         key = lambda name: f"{self.prefix}:{name}"  # noqa: E731
         self.corpus = CorpusVersion(redis=lambda: _CLIENT, key=key)
-        cache = RetrievalCache(redis=lambda: _CLIENT, key=key, corpus=self.corpus,
-                               fingerprint="f", ttl_seconds=60)
+        cache = RetrievalCache(
+            redis=lambda: _CLIENT, key=key, corpus=self.corpus, fingerprint="f", ttl_seconds=60
+        )
         self.searches = []
 
         def search(query, top_k, filter_expr):
@@ -106,8 +124,11 @@ class RetrieveDocumentsTests(unittest.TestCase):
         self._patches = [
             patch.object(utils, "_retrieval_cache", lambda: cache),
             patch.object(utils, "_search", search),
-            patch.object(utils, "language_filter_clause",
-                         lambda language: f' and filename not in ["{language}"]' if language else ""),
+            patch.object(
+                utils,
+                "language_filter_clause",
+                lambda language: f' and filename not in ["{language}"]' if language else "",
+            ),
         ]
         for patcher in self._patches:
             patcher.start()
@@ -156,7 +177,8 @@ class CorpusChangeTests(unittest.TestCase):
 
         changes = []
         store = milvus_client.MilvusStore(
-            milvus_client.MilvusSettings("h", "1", "c", "http://h:1", 1.0), on_change=lambda: changes.append(1)
+            milvus_client.MilvusSettings("h", "1", "c", "http://h:1", 1.0),
+            on_change=lambda: changes.append(1),
         )
         with patch.object(milvus_client, "milvus_client_session", session):
             store.query("id >= 0")
@@ -182,8 +204,9 @@ class CorpusChangeTests(unittest.TestCase):
             yield uow
 
         changes = []
-        store = ParentChunkStore(unit_of_work=unit_of_work, cache=DictCache(),
-                                 on_change=lambda: changes.append(1))
+        store = ParentChunkStore(
+            unit_of_work=unit_of_work, cache=DictCache(), on_change=lambda: changes.append(1)
+        )
         store.upsert_documents([{"chunk_id": "c1", "text": "Fees", "filename": "fees.pdf"}])
         store.delete_by_filename("fees.pdf")
         self.assertEqual(2, len(changes))
@@ -215,7 +238,9 @@ class FailOpenTests(unittest.TestCase):
         def must_not_be_asked():
             raise AssertionError("no round trip with the cache off")
 
-        cache = RetrievalCache(redis=must_not_be_asked, corpus=CorpusVersion(), fingerprint="f", ttl_seconds=0)
+        cache = RetrievalCache(
+            redis=must_not_be_asked, corpus=CorpusVersion(), fingerprint="f", ttl_seconds=0
+        )
         result, ticket = cache.lookup("fees", 5, "")
         cache.store(ticket, RESULT)
         self.assertIsNone(result)

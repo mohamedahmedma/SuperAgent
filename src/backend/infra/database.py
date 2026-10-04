@@ -54,6 +54,7 @@ _POOL_OPTIONS = {
     "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT_SECONDS") or 30),
 }
 
+
 def _without_nul(value):
     """`value` with NUL removed from every string inside it, dictionary keys included."""
     if isinstance(value, str):

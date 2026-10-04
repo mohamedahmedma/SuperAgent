@@ -24,6 +24,7 @@ the rollback is to stop using the new ones. `split` also refuses to guess: anyth
 cannot attribute to exactly one school is reported and left behind rather than copied into
 whichever school looked most likely.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,14 +51,13 @@ from sis.application.services.estate import (  # noqa: E402
     plan_provision,
 )
 from sis.domain.errors import SisError  # noqa: E402
-from sis.infrastructure.estate.seeding import seed_school_row  # noqa: E402
 from sis.infrastructure.estate import (  # noqa: E402
     ConfigStoreUnavailable,
     DotEnvConfigStore,
     ProvisioningFailed,
     provisioner_for,
 )
-
+from sis.infrastructure.estate.seeding import seed_school_row  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -107,9 +107,7 @@ def _alembic_upgrade(url: str) -> None:
         text=True,
     )
     if result.returncode != 0:
-        raise SystemExit(
-            f"Migration failed for {url}:\n{result.stdout}\n{result.stderr}"
-        )
+        raise SystemExit(f"Migration failed for {url}:\n{result.stdout}\n{result.stderr}")
 
 
 def _schema_version(url: str) -> str:
@@ -117,9 +115,7 @@ def _schema_version(url: str) -> str:
     engine = create_engine(url, future=True)
     try:
         with engine.connect() as connection:
-            row = connection.execute(
-                text("SELECT version_num FROM alembic_version")
-            ).first()
+            row = connection.execute(text("SELECT version_num FROM alembic_version")).first()
             return row[0] if row else "empty"
     except Exception:  # noqa: BLE001 - a missing table or an absent file, both reportable
         return "not-migrated"
@@ -205,9 +201,7 @@ def cmd_provision(args: argparse.Namespace) -> int:
         return 0
 
     service = EstateService(
-        provisioner_for(
-            plan.database_url, admin_url=os.getenv("SIS_ADMIN_DATABASE_URL", "")
-        ),
+        provisioner_for(plan.database_url, admin_url=os.getenv("SIS_ADMIN_DATABASE_URL", "")),
         DotEnvConfigStore(PROJECT_ROOT.parent / ".env"),
     )
     service.provision(args.code, template=template, existing_codes=existing)
@@ -259,8 +253,7 @@ def cmd_split(args: argparse.Namespace) -> int:
     try:
         with engine.connect() as connection:
             present = [
-                row[0]
-                for row in connection.execute(text("SELECT code FROM schools ORDER BY code"))
+                row[0] for row in connection.execute(text("SELECT code FROM schools ORDER BY code"))
             ]
     finally:
         engine.dispose()
@@ -290,9 +283,7 @@ def cmd_split(args: argparse.Namespace) -> int:
         if target is None:
             raise SystemExit(f"{tenant.code}: target {tenant.database_url} is not a file.")
         if target.exists():
-            raise SystemExit(
-                f"{tenant.code}: {target} already exists. Refusing to overwrite it."
-            )
+            raise SystemExit(f"{tenant.code}: {target} already exists. Refusing to overwrite it.")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source_path, target)
         kept = _prune_to_one_school(tenant.database_url, tenant.code)
@@ -341,15 +332,11 @@ def _prune_to_one_school(url: str, code: str) -> int:
             params = {"sid": school_id}
             # Leaves first.
             connection.execute(
-                text(
-                    f"DELETE FROM subject_grades WHERE class_section_id NOT IN ({mine_sections})"
-                ),
+                text(f"DELETE FROM subject_grades WHERE class_section_id NOT IN ({mine_sections})"),
                 params,
             )
             connection.execute(
-                text(
-                    f"DELETE FROM attendance WHERE class_section_id NOT IN ({mine_sections})"
-                ),
+                text(f"DELETE FROM attendance WHERE class_section_id NOT IN ({mine_sections})"),
                 params,
             )
             connection.execute(
@@ -359,9 +346,7 @@ def _prune_to_one_school(url: str, code: str) -> int:
                 params,
             )
             connection.execute(
-                text(
-                    f"DELETE FROM student_guardians WHERE student_id NOT IN ({mine_students})"
-                ),
+                text(f"DELETE FROM student_guardians WHERE student_id NOT IN ({mine_students})"),
                 params,
             )
             connection.execute(
@@ -399,9 +384,7 @@ def _prune_to_one_school(url: str, code: str) -> int:
             connection.execute(
                 text(f"DELETE FROM academic_years WHERE id NOT IN ({mine_years})"), params
             )
-            connection.execute(
-                text("DELETE FROM schools WHERE id != :sid"), params
-            )
+            connection.execute(text("DELETE FROM schools WHERE id != :sid"), params)
             # Import batches reference nothing school-scoped and are working state; a
             # half-finished preview must not be committable against the new file.
             connection.execute(text("DELETE FROM import_rows"))
@@ -419,9 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list", help="every school, its database, and its schema version")
 
     migrate = sub.add_parser("migrate", help="alembic upgrade head, per school")
-    migrate.add_argument(
-        "school", nargs="*", help="only these schools (default: all of them)"
-    )
+    migrate.add_argument("school", nargs="*", help="only these schools (default: all of them)")
 
     provision = sub.add_parser("provision", help="create one school's database")
     provision.add_argument("code", help="the school code, as named in SIS_SCHOOLS")

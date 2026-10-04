@@ -32,6 +32,7 @@ may write nothing. That is the safe direction: the fix is a supervisor assigning
 class, which is a screen that exists, and the failure is a refusal rather than a mark
 written into somebody else's subject.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -111,15 +112,11 @@ class TeachingService:
             return False
         with self._uow_factory() as uow:
             return (
-                uow._session.scalar(
-                    select(m.Teacher.id).where(m.Teacher.user_id == int(user_id))
-                )
+                uow._session.scalar(select(m.Teacher.id).where(m.Teacher.user_id == int(user_id)))
                 is not None
             )
 
-    def may_record(
-        self, user_id: int | None, *, class_section_id: int, subject_id: int
-    ) -> bool:
+    def may_record(self, user_id: int | None, *, class_section_id: int, subject_id: int) -> bool:
         """The rule: teaching staff record their own subject, in their own rooms.
 
         Answers `True` for a caller who is not teaching staff — their boundary is their
@@ -233,9 +230,7 @@ class TeachingService:
         subject assignment in this room. Keeping those cases distinct prevents an
         unassigned teacher from inheriting office-wide behaviour.
         """
-        subject_ids = self.subject_ids_in_class(
-            user_id, class_section_id=class_section_id
-        )
+        subject_ids = self.subject_ids_in_class(user_id, class_section_id=class_section_id)
         if subject_ids is None:
             return None
         if not subject_ids:

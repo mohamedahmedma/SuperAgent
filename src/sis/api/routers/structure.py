@@ -15,38 +15,35 @@ answer 201 or 200 rather than 201 or 409. Invariant 6 is what makes that safe: t
 identity, the names are labels, and re-posting a term with a corrected Arabic name renames
 it without detaching one grade.
 """
+
 from collections.abc import Sequence
 from datetime import date, datetime
-from zoneinfo import ZoneInfo
 from typing import Annotated, Literal, Protocol
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from sis.api.deps import (
-    Caller,
+    Principal,
+    UowFactoryDep,
     get_query_service,
     get_structure_catalogue,
     get_structure_service,
-    require_read_access,
-    require_registrar,
-    Principal,
     require_permission,
-    UowFactoryDep,
 )
-from sis.domain.rbac import Permission, RoleCode
-from sis.domain.errors import UnknownReference
 from sis.api.routers import domain_errors, error_responses
 from sis.application.dto import GenerateStructureCommand, TermPlan
 from sis.application.services import QueryService, StructureGenerationService
+from sis.domain.errors import UnknownReference, ValidationError
+from sis.domain.rbac import Permission, RoleCode
 from sis.domain.structure import (
     AcademicYear,
     AcademicYearStatus,
     ClassSection,
     School,
     SchoolLanguage,
-    Stage,
     Subject,
     Term,
     WorkingDay,
@@ -89,7 +86,10 @@ class StructureCatalogue(Protocol):
 # registrar out of the very dropdowns she generates the structure from.
 Reader = Annotated[Principal, Depends(require_permission(Permission.STRUCTURE_READ))]
 Registrar = Annotated[Principal, Depends(require_permission(Permission.STRUCTURE_WRITE))]
-PrincipalStructureWriter = Annotated[Principal, Depends(require_permission(Permission.STRUCTURE_READ))]
+PrincipalStructureWriter = Annotated[
+    Principal, Depends(require_permission(Permission.STRUCTURE_READ))
+]
+
 
 def _allow_principal_structure_write(caller: Principal, locate) -> None:  # noqa: ANN001
     """Keep the existing writer contract, plus a principal bounded to their own school.
@@ -212,7 +212,9 @@ class AcademicYearIn(BaseModel):
 
     def resolved_status(self) -> AcademicYearStatus:
         if self.status is not None:
-            if self.is_current is not None and self.is_current != (self.status is AcademicYearStatus.ACTIVE):
+            if self.is_current is not None and self.is_current != (
+                self.status is AcademicYearStatus.ACTIVE
+            ):
                 raise ValidationError("is_current must match status", field="status")
             return self.status
         return AcademicYearStatus.ACTIVE if self.is_current else AcademicYearStatus.UPCOMING
@@ -300,7 +302,7 @@ class GenerateStructureIn(BaseModel):
     classes_per_year: int | None = Field(default=None, ge=0)
     classes_by_year: dict[str, int] | None = Field(
         default=None,
-        description="Year level code to section count, e.g. `{\"Y1\": 3, \"Y2\": 5}`. "
+        description='Year level code to section count, e.g. `{"Y1": 3, "Y2": 5}`. '
         "Key order is creation order.",
     )
     year_code_template: str | None = Field(default=None, examples=["Y{n}"])
@@ -364,7 +366,9 @@ class TermIn(BaseModel):
     academic_year_code: str = Field(examples=["2025-2026"])
     name_ar: str = ""
     name_en: str = ""
-    starts_on: date | None = Field(default=None, description=f"First day of term. {_TERM_DATE_NOTE}")
+    starts_on: date | None = Field(
+        default=None, description=f"First day of term. {_TERM_DATE_NOTE}"
+    )
     ends_on: date | None = Field(
         default=None, description=f"Last day of term, inclusive. {_TERM_DATE_NOTE}"
     )
@@ -532,7 +536,10 @@ class GradeSubjectAssignmentsOut(BaseModel):
     responses=error_responses(401, 403, 404, 409, 422),
 )
 def generate_structure(
-    body: GenerateStructureIn, structure: Structure, catalogue: Catalogue, caller: PrincipalStructureWriter
+    body: GenerateStructureIn,
+    structure: Structure,
+    catalogue: Catalogue,
+    caller: PrincipalStructureWriter,
 ) -> GenerateStructureOut:
     _allow_principal_structure_write(
         caller, lambda scopes: scopes.for_year(body.academic_year_code)
@@ -584,9 +591,7 @@ def list_years(
         academic_years = queries.list_academic_years(school_code)
         # Empty rather than "every school's rungs" when no school is named. See the route
         # description: a merged ladder is a list a registrar cannot act on.
-        year_levels = (
-            queries.list_year_levels(school_code) if school_code is not None else ()
-        )
+        year_levels = queries.list_year_levels(school_code) if school_code is not None else ()
         current = queries.current_academic_year(school_code)
     return StructureYearsOut(
         academic_years=[AcademicYearOut.of(year) for year in academic_years],
@@ -685,10 +690,14 @@ def update_term_dates(
             caller, lambda scopes: scopes.for_year(str(current.academic_year_code))
         )
         updated = Term(
-            code=current.code, academic_year_code=current.academic_year_code,
-            name_ar=current.name_ar, name_en=current.name_en,
-            starts_on=body.starts_on, ends_on=body.ends_on,
-            sequence=current.sequence, is_closed=current.is_closed,
+            code=current.code,
+            academic_year_code=current.academic_year_code,
+            name_ar=current.name_ar,
+            name_en=current.name_en,
+            starts_on=body.starts_on,
+            ends_on=body.ends_on,
+            sequence=current.sequence,
+            is_closed=current.is_closed,
         )
         catalogue.create_term(updated)
     return TermOut.of(updated)
@@ -714,9 +723,7 @@ def update_term_dates(
 def create_academic_year(
     body: AcademicYearIn, catalogue: Catalogue, caller: PrincipalStructureWriter, response: Response
 ) -> AcademicYearOut:
-    _allow_principal_structure_write(
-        caller, lambda scopes: scopes.for_school(body.school_code)
-    )
+    _allow_principal_structure_write(caller, lambda scopes: scopes.for_school(body.school_code))
     status_value = body.resolved_status()
     existing = _year_if_present(catalogue, body.code)
     if existing is None:
@@ -1001,6 +1008,7 @@ def create_class_section(
         response.status_code = status.HTTP_200_OK
     return ClassSectionOut.of(section)
 
+
 @router.patch(
     "/structure/classes/{class_code}",
     response_model=ClassSectionOut,
@@ -1026,6 +1034,7 @@ def rename_class_section(
         )
     return ClassSectionOut.of(section)
 
+
 # -- Schools ----------------------------------------------------------------
 #
 # The outermost scope, and the newest. Everything above belongs to one school, reached
@@ -1047,13 +1056,18 @@ class SchoolIn(BaseModel):
     primary_grade_count: int = Field(default=6, ge=0, le=6)
     preparatory_grade_count: int = Field(default=3, ge=0, le=3)
     secondary_grade_count: int = Field(
-        default=3, ge=0, le=3,
+        default=3,
+        ge=0,
+        le=3,
         description="The current curriculum configuration defines three secondary grades.",
     )
     term_count: Literal[1, 2, 3] = 2
-    working_days: list[Literal[
-        "saturday", "sunday", "monday", "tuesday", "wednesday", "thursday", "friday"
-    ]] = Field(default_factory=lambda: ["sunday", "monday", "tuesday", "wednesday", "thursday"], min_length=1)
+    working_days: list[
+        Literal["saturday", "sunday", "monday", "tuesday", "wednesday", "thursday", "friday"]
+    ] = Field(
+        default_factory=lambda: ["sunday", "monday", "tuesday", "wednesday", "thursday"],
+        min_length=1,
+    )
     is_active: bool = Field(
         default=True,
         description="Set false to close a branch. Nothing is deleted: the registers taken "
@@ -1109,9 +1123,7 @@ class YearTrackOut(BaseModel):
     name_en: str = ""
     name_ar: str = ""
     year_levels: list[YearLevelOut] = Field(default_factory=list)
-    class_count: int = Field(
-        default=0, description="Classes this track's rungs hold in this year."
-    )
+    class_count: int = Field(default=0, description="Classes this track's rungs hold in this year.")
 
 
 class AcademicYearDetailOut(BaseModel):
@@ -1146,9 +1158,7 @@ class AcademicYearDetailOut(BaseModel):
     "instant. Unknown year is a 404.",
     responses=error_responses(401, 403, 404, 422),
 )
-def read_academic_year(
-    code: str, catalogue: Catalogue, caller: Reader
-) -> AcademicYearDetailOut:
+def read_academic_year(code: str, catalogue: Catalogue, caller: Reader) -> AcademicYearDetailOut:
     with domain_errors():
         detail = catalogue.academic_year_detail(AcademicYearCode(code))
     return AcademicYearDetailOut(
@@ -1162,8 +1172,7 @@ def read_academic_year(
                 name_ar="" if group["track"] is None else group["track"].name_ar,
                 year_levels=[YearLevelOut.of(level) for level in group["levels"]],
                 class_count=sum(
-                    group["classes_per_level"].get(str(level.code), 0)
-                    for level in group["levels"]
+                    group["classes_per_level"].get(str(level.code), 0) for level in group["levels"]
                 ),
             )
             for group in detail["tracks"]
@@ -1261,9 +1270,7 @@ def create_school(
         )
         # `model_fields_set` is the only thing that can tell "the caller asked for two
         # terms" apart from "the caller said nothing and Pydantic filled in two".
-        stored, created, plans = catalogue.create_school(
-            school, stated=body.model_fields_set
-        )
+        stored, created, plans = catalogue.create_school(school, stated=body.model_fields_set)
     if not created:
         response.status_code = status.HTTP_200_OK
     return SchoolOut.of(stored, terms=plans)
@@ -1296,15 +1303,19 @@ class ConfiguredClassesIn(BaseModel):
     sequence: Literal["numeric", "alphabetic"]
 
 
-@router.get("/schools/{school_code}/tracks/{track_code}/configured-grades",
-    response_model=list[ConfiguredGradeOut])
+@router.get(
+    "/schools/{school_code}/tracks/{track_code}/configured-grades",
+    response_model=list[ConfiguredGradeOut],
+)
 def configured_grades(school_code: str, track_code: str, catalogue: Catalogue, caller: Reader):
     with domain_errors():
         return catalogue.configured_grades(SchoolCode(school_code), track_code)
 
 
 @router.post("/structure/configured-classes", response_model=list[ClassSectionOut])
-def create_configured_classes(body: ConfiguredClassesIn, catalogue: Catalogue, caller: PrincipalStructureWriter):
+def create_configured_classes(
+    body: ConfiguredClassesIn, catalogue: Catalogue, caller: PrincipalStructureWriter
+):
     _allow_principal_structure_write(
         caller, lambda scopes: scopes.for_year(body.academic_year_code)
     )
@@ -1313,8 +1324,10 @@ def create_configured_classes(body: ConfiguredClassesIn, catalogue: Catalogue, c
             if body.class_count is None:
                 raise ValidationError("class_count is required in same mode", field="class_count")
         _, sections = catalogue.create_configured_classes(
-            AcademicYearCode(body.academic_year_code), body.track_code,
-            body.classes_by_grade if body.mode == "custom" else None, body.sequence,
+            AcademicYearCode(body.academic_year_code),
+            body.track_code,
+            body.classes_by_grade if body.mode == "custom" else None,
+            body.sequence,
             same_count=body.class_count if body.mode == "same" else None,
         )
     return [ClassSectionOut.of(section) for section in sections]
@@ -1354,9 +1367,7 @@ def list_school_tracks(
     "empty ladder.",
     responses=error_responses(401, 403, 404, 422),
 )
-def list_school_levels(
-    school_code: str, queries: Queries, caller: Reader
-) -> list[YearLevelOut]:
+def list_school_levels(school_code: str, queries: Queries, caller: Reader) -> list[YearLevelOut]:
     with domain_errors():
         levels = queries.list_year_levels(SchoolCode(school_code))
     return [YearLevelOut.of(level) for level in levels]

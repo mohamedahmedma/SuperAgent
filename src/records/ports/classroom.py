@@ -34,6 +34,7 @@ belongs to the system of record, which owns the placements. A caller holding a c
 would eventually ask about a room the child has left. So this takes a student and a term,
 exactly as the marks and timetable ports do, and never a class.
 """
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -44,9 +45,7 @@ from records.domain.classroom import StudentClassroom
 class StudentClassrooms(Protocol):
     """What the facade needs to answer "which class, which subjects, which teachers"."""
 
-    def get_classroom(
-        self, *, student_ref: str, term: str, guardian_ref: str
-    ) -> StudentClassroom:
+    def get_classroom(self, *, student_ref: str, term: str, guardian_ref: str) -> StudentClassroom:
         """One child's room for one term, read on behalf of one guardian.
 
         Takes the SCHOOL's student reference — the number on a letter home — never an

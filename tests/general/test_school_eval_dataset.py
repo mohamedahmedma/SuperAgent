@@ -9,6 +9,7 @@ never be allowed to rot in.
 
 So the oracle gets the same treatment as the code it judges.
 """
+
 import unittest
 
 from tests.evals.school_dataset import CASES, DATASET_VERSION, cases, missing, satisfied

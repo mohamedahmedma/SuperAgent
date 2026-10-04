@@ -9,13 +9,14 @@ surcharge, arithmetic the parent asked for. Those went with the check itself: a 
 reaches the reader as a block the tool rendered, so there is no model-written figure left
 to verify. See tests/general/test_answer_blocks.py for what replaced it.
 """
+
 import unittest
 
 from backend.agent.chat.child_context import SessionChild
 from backend.agent.chat.child_resolution import resolve_child
 from backend.agent.chat.child_roster import ChildOption
 from backend.agent.chat.turn_policy import TurnPlan, _plan_child
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 
 MARKERS = get_profile().agent.year_reference_markers
 

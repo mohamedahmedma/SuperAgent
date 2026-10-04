@@ -15,6 +15,7 @@ The rule that makes that safe to do repeatedly is that seeding never overwrites.
 exist mostly to pin that: a password changed through the admin routes must survive the next
 deploy, or the feature is a scheduled credential reset.
 """
+
 import os
 import unittest
 from unittest.mock import patch
@@ -26,7 +27,6 @@ from identity.infrastructure.db.base import Base
 from identity.infrastructure.db.bootstrap import has_any_admin, seed_bootstrap_admin
 from identity.infrastructure.db.models import Account
 from identity.infrastructure.db.session import get_engine, new_session
-
 from tests.identity.conftest import _claim_database
 
 #: Cheap on purpose. These tests hash on nearly every case, and the round count is a property
@@ -197,9 +197,7 @@ class HalfConfiguredTests(_DatabaseCase):
     def test_a_username_with_no_password_creates_nothing(self):
         """An account with an empty password is not a degraded state, it is an open door."""
         with self.assertLogs(bootstrap_module.logger, level="WARNING") as logs:
-            seed_bootstrap_admin(
-                username=self.USERNAME, password="", pbkdf2_rounds=ROUNDS
-            )
+            seed_bootstrap_admin(username=self.USERNAME, password="", pbkdf2_rounds=ROUNDS)
 
         self.assertEqual([], accounts_named(self.USERNAME))
         self.assertIn("IDENTITY_BOOTSTRAP_ADMIN_PASSWORD", "".join(logs.output))
@@ -232,9 +230,7 @@ class HalfConfiguredTests(_DatabaseCase):
 
         Refusing to boot would turn a management inconvenience into a school-wide outage.
         """
-        with patch.object(
-            bootstrap_module, "new_session", side_effect=RuntimeError("no database")
-        ):
+        with patch.object(bootstrap_module, "new_session", side_effect=RuntimeError("no database")):
             seed_bootstrap_admin(username="anyone", password="p", pbkdf2_rounds=ROUNDS)
 
 
@@ -287,9 +283,7 @@ class AdminPresenceTests(_DatabaseCase):
         self.addCleanup(wipe, self.USERNAME)
 
     def test_a_seeded_admin_is_seen(self):
-        seed_bootstrap_admin(
-            username=self.USERNAME, password="p4ssword", pbkdf2_rounds=ROUNDS
-        )
+        seed_bootstrap_admin(username=self.USERNAME, password="p4ssword", pbkdf2_rounds=ROUNDS)
 
         self.assertTrue(has_any_admin())
 
@@ -299,9 +293,7 @@ class AdminPresenceTests(_DatabaseCase):
         It must never be the thing that breaks the boot, so an unreachable database has to
         return rather than propagate.
         """
-        with patch.object(
-            bootstrap_module, "new_session", side_effect=RuntimeError("no database")
-        ):
+        with patch.object(bootstrap_module, "new_session", side_effect=RuntimeError("no database")):
             self.assertTrue(has_any_admin())
 
 

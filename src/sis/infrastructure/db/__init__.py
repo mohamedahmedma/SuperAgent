@@ -3,6 +3,7 @@
 Re-exported here so callers write `from sis.infrastructure.db import Base` and stay
 insulated from whether `Base` sits in `base.py` or moves later.
 """
+
 from sis.infrastructure.db.base import Base
 from sis.infrastructure.db.session import (
     get_engine,

@@ -18,6 +18,7 @@ a room can lack either, both or neither.
 Mocked at the adapter's own `_get`, which is where `records/`'s other adapter tests sit — no
 network, and no extra dependency to keep current.
 """
+
 from unittest.mock import patch
 
 import pytest
@@ -84,16 +85,12 @@ NO_CLASS = {
 
 @pytest.fixture()
 def adapter() -> SisClassroomAdapter:
-    return SisClassroomAdapter(
-        base_url="http://sis.test", api_key="reader", timeout_seconds=5.0
-    )
+    return SisClassroomAdapter(base_url="http://sis.test", api_key="reader", timeout_seconds=5.0)
 
 
 def test_the_room_arrives_named_and_whole(adapter: SisClassroomAdapter) -> None:
     with patch.object(SisClassroomAdapter, "_get", return_value=ROOM):
-        room = adapter.get_classroom(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        room = adapter.get_classroom(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
     assert room.status is ClassroomStatus.OK
     assert room.has_class is True
@@ -108,9 +105,7 @@ def test_the_subject_board_keeps_the_school_s_order(adapter: SisClassroomAdapter
     """Never re-sorted: alphabetical differs between the two scripts this estate renders,
     so a sort here would make one board read in two orders."""
     with patch.object(SisClassroomAdapter, "_get", return_value=ROOM):
-        room = adapter.get_classroom(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        room = adapter.get_classroom(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
     assert [s.code for s in room.subjects] == ["MATH", "SCI"]
     assert [s.name_ar for s in room.subjects] == ["الرياضيات", "العلوم"]
@@ -124,9 +119,7 @@ def test_a_co_teacher_is_not_collapsed_away(adapter: SisClassroomAdapter) -> Non
     that held one teacher per subject would silently drop somebody.
     """
     with patch.object(SisClassroomAdapter, "_get", return_value=ROOM):
-        room = adapter.get_classroom(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        room = adapter.get_classroom(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
     assert len(room.teachers) == 3
     science = sorted(t.full_name_ar for t in room.teachers if t.subject_code == "SCI")
@@ -143,9 +136,7 @@ def test_no_placement_is_a_status_rather_than_three_empty_lists(
     able to tell those apart or it tells a parent her daughter studies nothing.
     """
     with patch.object(SisClassroomAdapter, "_get", return_value=NO_CLASS):
-        room = adapter.get_classroom(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        room = adapter.get_classroom(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
     assert room.status is ClassroomStatus.NO_CLASS
     assert room.has_class is False
@@ -166,9 +157,7 @@ def test_a_room_with_nothing_entered_yet_still_has_a_class(
     with patch.object(
         SisClassroomAdapter, "_get", return_value={**ROOM, "subjects": [], "teachers": []}
     ):
-        room = adapter.get_classroom(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        room = adapter.get_classroom(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
     assert room.status is ClassroomStatus.OK
     assert room.class_name_en == "Primary 3 Class 1"
@@ -182,9 +171,7 @@ def test_nothing_on_file_is_an_answer_and_not_an_outage(
     """SIS's `unknown_reference` covers an unknown child, one that is not hers, and an
     unknown term. `records/` deliberately makes those indistinguishable."""
     with patch.object(SisClassroomAdapter, "_get", return_value=None):
-        room = adapter.get_classroom(
-            student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-        )
+        room = adapter.get_classroom(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
     assert room.status is ClassroomStatus.NO_CLASS
 
@@ -210,9 +197,7 @@ def test_the_room_is_read_through_the_guardian_scoped_route(
     adapter: SisClassroomAdapter,
 ) -> None:
     """The guardian travels with the request, so SIS re-checks the link on this read."""
-    path, params = _path_asked(
-        adapter, student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-    )
+    path, params = _path_asked(adapter, student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
     assert path == "/v1/guardians/by-id/G-1/students/S-1001/classroom"
     assert params == {"term": "2026-T1"}
 
@@ -223,9 +208,7 @@ def test_no_class_is_ever_asked_for(adapter: SisClassroomAdapter) -> None:
     Pinned because the tempting shortcut — pass the class code the last response carried —
     works until a child moves and then asks about a room she has left.
     """
-    path, params = _path_asked(
-        adapter, student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-    )
+    path, params = _path_asked(adapter, student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
     assert "class" not in params
     assert "3A" not in path
 
@@ -234,22 +217,18 @@ def test_a_handle_with_a_slash_cannot_rewrite_the_path(
     adapter: SisClassroomAdapter,
 ) -> None:
     """A handle is opaque and comes off a token. Quoting it is not optional."""
-    path, _ = _path_asked(
-        adapter, student_ref="S-1001", term="2026-T1", guardian_ref="../.."
-    )
+    path, _ = _path_asked(adapter, student_ref="S-1001", term="2026-T1", guardian_ref="../..")
     assert path == "/v1/guardians/by-id/..%2F../students/S-1001/classroom"
     assert "/v1/students/" not in path
 
 
 def test_an_unreachable_sis_is_never_a_child_with_no_teachers() -> None:
-    """"Could not ask" is never "the answer is no".
+    """ "Could not ask" is never "the answer is no".
 
     Failing soft here would tell a parent her daughter has no class and no teachers because
     a service was briefly down.
     """
-    adapter = SisClassroomAdapter(
-        base_url="http://sis.test", api_key="reader", timeout_seconds=5.0
-    )
+    adapter = SisClassroomAdapter(base_url="http://sis.test", api_key="reader", timeout_seconds=5.0)
 
     class _Boom:
         def get(self, *_args, **_kwargs):
@@ -259,9 +238,7 @@ def test_an_unreachable_sis_is_never_a_child_with_no_teachers() -> None:
 
     with patch.object(adapter._pool, "get", return_value=_Boom()):
         with pytest.raises(ClassroomUnavailable):
-            adapter.get_classroom(
-                student_ref="S-1001", term="2026-T1", guardian_ref="G-1"
-            )
+            adapter.get_classroom(student_ref="S-1001", term="2026-T1", guardian_ref="G-1")
 
 
 def test_a_base_url_is_required() -> None:

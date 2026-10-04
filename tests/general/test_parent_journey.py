@@ -21,6 +21,7 @@ conftest does:
 
     pytest tests/test_parent_journey.py -q
 """
+
 import hashlib
 import hmac
 import itertools
@@ -107,12 +108,12 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from identity.config import reset_settings as reset_identity_settings  # noqa: E402
 from identity.config import settings as identity_settings  # noqa: E402
+from identity.domain.schools import SchoolRegistry  # noqa: E402
 from identity.infrastructure.crypto.keys import signing_key_from  # noqa: E402
 from identity.infrastructure.directory.fake import (  # noqa: E402
     FakeGuardianDirectory,
 )
 from identity.infrastructure.directory.sis import SisGuardianDirectory  # noqa: E402
-from identity.domain.schools import SchoolRegistry  # noqa: E402
 from identity.infrastructure.whatsapp.channels import (  # noqa: E402
     WhatsAppChannels,
 )
@@ -122,21 +123,21 @@ from identity.infrastructure.whatsapp.gateways import (  # noqa: E402
 
 # --- the cast --------------------------------------------------------------
 
-MOTHER = "+201001234567"          # Fatma — two children, two numbers
+MOTHER = "+201001234567"  # Fatma — two children, two numbers
 MOTHER_ALT = "+201119998888"
 MOTHER_WA = "201001234567"
 MOTHER_ALT_WA = "201119998888"
 
-FATHER = "+201002223333"          # Hassan — one child
+FATHER = "+201002223333"  # Hassan — one child
 FATHER_WA = "201002223333"
 
-BROTHER = "+201005554444"         # Karim — on file, barred by a court order
+BROTHER = "+201005554444"  # Karim — on file, barred by a court order
 BROTHER_WA = "201005554444"
 
-OTHER_PARENT = "+201007778888"    # Mona — a different family entirely
+OTHER_PARENT = "+201007778888"  # Mona — a different family entirely
 OTHER_PARENT_WA = "201007778888"
 
-STRANGER_WA = "201110000000"      # nobody the school has ever heard of
+STRANGER_WA = "201110000000"  # nobody the school has ever heard of
 
 TERM = "2026-T1"
 
@@ -174,97 +175,226 @@ def _seed_sis() -> None:
     # 3A "Year 3 A" would let a bug that answers a parent with the internal code pass by
     # looking almost right. `class_name` and `class_code` must be independently readable.
     sections = [
-        ClassSection(code=code, academic_year_code="2025-2026", year_level_code="3",
-                     name_en=f"Primary 3 Class {index}", name_ar=f"الثالث/{index}")
+        ClassSection(
+            code=code,
+            academic_year_code="2025-2026",
+            year_level_code="3",
+            name_en=f"Primary 3 Class {index}",
+            name_ar=f"الثالث/{index}",
+        )
         for index, code in enumerate(("3A", "3B"), start=1)
     ]
 
     with SqlAlchemyUnitOfWork() as uow:
         uow.schools.upsert_many([School(code="MAIN", name_en="Main", name_ar="الرئيسي")])
-        uow.academic_years.upsert_many([
-            AcademicYear(code="2025-2026", school_code="MAIN", name_en="2025/2026",
-                         name_ar="٢٠٢٥/٢٠٢٦", starts_on=date(2025, 9, 1),
-                         ends_on=date(2026, 6, 30), is_current=True)])
-        uow.year_levels.upsert_many([
-            YearLevel(code="3", school_code="MAIN", name_en="Year 3", name_ar="الثالث",
-                      display_order=3)])
+        uow.academic_years.upsert_many(
+            [
+                AcademicYear(
+                    code="2025-2026",
+                    school_code="MAIN",
+                    name_en="2025/2026",
+                    name_ar="٢٠٢٥/٢٠٢٦",
+                    starts_on=date(2025, 9, 1),
+                    ends_on=date(2026, 6, 30),
+                    is_current=True,
+                )
+            ]
+        )
+        uow.year_levels.upsert_many(
+            [
+                YearLevel(
+                    code="3",
+                    school_code="MAIN",
+                    name_en="Year 3",
+                    name_ar="الثالث",
+                    display_order=3,
+                )
+            ]
+        )
         uow.class_sections.upsert_many(sections)
-        uow.terms.upsert_many([
-            Term(code=TERM, academic_year_code="2025-2026", name_en="Term 1",
-                 name_ar="الفصل الأول", starts_on=date(2025, 9, 1),
-                 ends_on=date(2025, 12, 15), sequence=1)])
-        uow.subjects.upsert_many([
-            Subject(code="MATH", academic_year_code="2025-2026", name_en="Mathematics",
-                    name_ar="الرياضيات", display_order=1),
-            Subject(code="ARB", academic_year_code="2025-2026", name_en="Arabic",
-                    name_ar="اللغة العربية", display_order=2),
-            Subject(code="SCI", academic_year_code="2025-2026", name_en="Science",
-                    name_ar="العلوم", display_order=3)])
-        uow.students.upsert_many([
-            Student(student_number=StudentNumber("S001"), full_name_ar="ليلى أحمد",
-                    full_name_en="Layla Ahmed"),
-            Student(student_number=StudentNumber("S002"), full_name_ar="عمر خالد",
-                    full_name_en="Omar Khaled"),
-            Student(student_number=StudentNumber("S003"), full_name_ar="نادية سمير",
-                    full_name_en="Nadia Samir")])
-        uow.enrolments.upsert_many([
-            ClassEnrolment(student_number=StudentNumber(n), academic_year_code="2025-2026",
-                           class_code=c, starts_on=date(2025, 9, 1))
-            for n, c in (("S001", "3A"), ("S002", "3A"), ("S003", "3B"))])
-        uow.guardians.upsert_many([
-            Guardian(phones=(Phone(MOTHER), Phone(MOTHER_ALT)), full_name_ar="فاطمة علي",
-                     full_name_en="Fatma Ali"),
-            Guardian(phones=(Phone(FATHER),), full_name_en="Hassan Mahmoud"),
-            Guardian(phones=(Phone(BROTHER),), full_name_en="Karim Hassan"),
-            Guardian(phones=(Phone(OTHER_PARENT),), full_name_en="Mona Said")])
-        uow.student_guardians.upsert_many([
-            StudentGuardian(student_number=StudentNumber("S001"), guardian_phone=Phone(MOTHER),
-                            relationship_type=RelationshipType.MOTHER,
-                            is_primary_contact=True, can_view_records=True),
-            StudentGuardian(student_number=StudentNumber("S002"), guardian_phone=Phone(MOTHER),
-                            relationship_type=RelationshipType.MOTHER, can_view_records=True),
-            StudentGuardian(student_number=StudentNumber("S001"), guardian_phone=Phone(FATHER),
-                            relationship_type=RelationshipType.FATHER, can_view_records=True),
-            # On file as a contact, barred from the records by a court order.
-            StudentGuardian(student_number=StudentNumber("S001"), guardian_phone=Phone(BROTHER),
-                            relationship_type=RelationshipType.SIBLING,
-                            relationship_label="big brother", can_view_records=False,
-                            restriction_note="court order 2026/114"),
-            StudentGuardian(student_number=StudentNumber("S003"), guardian_phone=Phone(OTHER_PARENT),
-                            relationship_type=RelationshipType.MOTHER, can_view_records=True)])
+        uow.terms.upsert_many(
+            [
+                Term(
+                    code=TERM,
+                    academic_year_code="2025-2026",
+                    name_en="Term 1",
+                    name_ar="الفصل الأول",
+                    starts_on=date(2025, 9, 1),
+                    ends_on=date(2025, 12, 15),
+                    sequence=1,
+                )
+            ]
+        )
+        uow.subjects.upsert_many(
+            [
+                Subject(
+                    code="MATH",
+                    academic_year_code="2025-2026",
+                    name_en="Mathematics",
+                    name_ar="الرياضيات",
+                    display_order=1,
+                ),
+                Subject(
+                    code="ARB",
+                    academic_year_code="2025-2026",
+                    name_en="Arabic",
+                    name_ar="اللغة العربية",
+                    display_order=2,
+                ),
+                Subject(
+                    code="SCI",
+                    academic_year_code="2025-2026",
+                    name_en="Science",
+                    name_ar="العلوم",
+                    display_order=3,
+                ),
+            ]
+        )
+        uow.students.upsert_many(
+            [
+                Student(
+                    student_number=StudentNumber("S001"),
+                    full_name_ar="ليلى أحمد",
+                    full_name_en="Layla Ahmed",
+                ),
+                Student(
+                    student_number=StudentNumber("S002"),
+                    full_name_ar="عمر خالد",
+                    full_name_en="Omar Khaled",
+                ),
+                Student(
+                    student_number=StudentNumber("S003"),
+                    full_name_ar="نادية سمير",
+                    full_name_en="Nadia Samir",
+                ),
+            ]
+        )
+        uow.enrolments.upsert_many(
+            [
+                ClassEnrolment(
+                    student_number=StudentNumber(n),
+                    academic_year_code="2025-2026",
+                    class_code=c,
+                    starts_on=date(2025, 9, 1),
+                )
+                for n, c in (("S001", "3A"), ("S002", "3A"), ("S003", "3B"))
+            ]
+        )
+        uow.guardians.upsert_many(
+            [
+                Guardian(
+                    phones=(Phone(MOTHER), Phone(MOTHER_ALT)),
+                    full_name_ar="فاطمة علي",
+                    full_name_en="Fatma Ali",
+                ),
+                Guardian(phones=(Phone(FATHER),), full_name_en="Hassan Mahmoud"),
+                Guardian(phones=(Phone(BROTHER),), full_name_en="Karim Hassan"),
+                Guardian(phones=(Phone(OTHER_PARENT),), full_name_en="Mona Said"),
+            ]
+        )
+        uow.student_guardians.upsert_many(
+            [
+                StudentGuardian(
+                    student_number=StudentNumber("S001"),
+                    guardian_phone=Phone(MOTHER),
+                    relationship_type=RelationshipType.MOTHER,
+                    is_primary_contact=True,
+                    can_view_records=True,
+                ),
+                StudentGuardian(
+                    student_number=StudentNumber("S002"),
+                    guardian_phone=Phone(MOTHER),
+                    relationship_type=RelationshipType.MOTHER,
+                    can_view_records=True,
+                ),
+                StudentGuardian(
+                    student_number=StudentNumber("S001"),
+                    guardian_phone=Phone(FATHER),
+                    relationship_type=RelationshipType.FATHER,
+                    can_view_records=True,
+                ),
+                # On file as a contact, barred from the records by a court order.
+                StudentGuardian(
+                    student_number=StudentNumber("S001"),
+                    guardian_phone=Phone(BROTHER),
+                    relationship_type=RelationshipType.SIBLING,
+                    relationship_label="big brother",
+                    can_view_records=False,
+                    restriction_note="court order 2026/114",
+                ),
+                StudentGuardian(
+                    student_number=StudentNumber("S003"),
+                    guardian_phone=Phone(OTHER_PARENT),
+                    relationship_type=RelationshipType.MOTHER,
+                    can_view_records=True,
+                ),
+            ]
+        )
         uow.commit()
 
     with SqlAlchemyUnitOfWork() as uow:
         ids = uow.class_sections.ids_for([s.identity for s in sections])
         a_id = ids[("2025-2026", "3A")]
-        uow.grades.upsert_many([
-            SubjectGrade(student_number=StudentNumber("S001"), subject_code="MATH",
-                         term_code=TERM, class_section_id=a_id, class_code="3A",
-                         percentage=Percentage(88.5)),
-            # Unmarked. Must reach a parent as "not marked yet", never as 0.
-            SubjectGrade(student_number=StudentNumber("S001"), subject_code="ARB",
-                         term_code=TERM, class_section_id=a_id, class_code="3A",
-                         percentage=None),
-            # A real zero, beside the blank above. The pair is what proves the two stay
-            # distinguishable all the way to the parent.
-            SubjectGrade(student_number=StudentNumber("S001"), subject_code="SCI",
-                         term_code=TERM, class_section_id=a_id, class_code="3A",
-                         percentage=Percentage(0.0)),
-            SubjectGrade(student_number=StudentNumber("S002"), subject_code="MATH",
-                         term_code=TERM, class_section_id=a_id, class_code="3A",
-                         percentage=Percentage(61.0))])
+        uow.grades.upsert_many(
+            [
+                SubjectGrade(
+                    student_number=StudentNumber("S001"),
+                    subject_code="MATH",
+                    term_code=TERM,
+                    class_section_id=a_id,
+                    class_code="3A",
+                    percentage=Percentage(88.5),
+                ),
+                # Unmarked. Must reach a parent as "not marked yet", never as 0.
+                SubjectGrade(
+                    student_number=StudentNumber("S001"),
+                    subject_code="ARB",
+                    term_code=TERM,
+                    class_section_id=a_id,
+                    class_code="3A",
+                    percentage=None,
+                ),
+                # A real zero, beside the blank above. The pair is what proves the two stay
+                # distinguishable all the way to the parent.
+                SubjectGrade(
+                    student_number=StudentNumber("S001"),
+                    subject_code="SCI",
+                    term_code=TERM,
+                    class_section_id=a_id,
+                    class_code="3A",
+                    percentage=Percentage(0.0),
+                ),
+                SubjectGrade(
+                    student_number=StudentNumber("S002"),
+                    subject_code="MATH",
+                    term_code=TERM,
+                    class_section_id=a_id,
+                    class_code="3A",
+                    percentage=Percentage(61.0),
+                ),
+            ]
+        )
         marks = []
         for index in range(10):
             state = (
-                AttendanceState.ABSENT if index == 3
-                else AttendanceState.EXCUSED if index == 5
-                else AttendanceState.LATE if index == 7
+                AttendanceState.ABSENT
+                if index == 3
+                else AttendanceState.EXCUSED
+                if index == 5
+                else AttendanceState.LATE
+                if index == 7
                 else AttendanceState.PRESENT
             )
-            marks.append(AttendanceMark(
-                student_number=StudentNumber("S001"), on_date=date(2025, 9, 1 + index),
-                state=state, class_section_id=a_id, class_code="3A",
-                note="doctor's note" if state is AttendanceState.EXCUSED else ""))
+            marks.append(
+                AttendanceMark(
+                    student_number=StudentNumber("S001"),
+                    on_date=date(2025, 9, 1 + index),
+                    state=state,
+                    class_section_id=a_id,
+                    class_code="3A",
+                    note="doctor's note" if state is AttendanceState.EXCUSED else "",
+                )
+            )
         uow.attendance.upsert_many(marks, recorded_by="journey")
         uow.commit()
 
@@ -374,31 +504,60 @@ def _seed_timetable() -> None:
         uow.timetable.replace_periods(
             SchoolCode("MAIN"),
             [
-                TimetablePeriod(school_code="MAIN", period_number=1, name_en="Period 1",
-                                name_ar="حصة ١", starts_at=clock(8, 0), ends_at=clock(8, 45)),
-                TimetablePeriod(school_code="MAIN", period_number=2, name_en="Break",
-                                name_ar="فسحة", starts_at=clock(8, 45), ends_at=clock(9, 5),
-                                is_teaching=False),
-                TimetablePeriod(school_code="MAIN", period_number=3, name_en="Period 3",
-                                name_ar="حصة ٣", starts_at=clock(9, 5), ends_at=clock(9, 50)),
+                TimetablePeriod(
+                    school_code="MAIN",
+                    period_number=1,
+                    name_en="Period 1",
+                    name_ar="حصة ١",
+                    starts_at=clock(8, 0),
+                    ends_at=clock(8, 45),
+                ),
+                TimetablePeriod(
+                    school_code="MAIN",
+                    period_number=2,
+                    name_en="Break",
+                    name_ar="فسحة",
+                    starts_at=clock(8, 45),
+                    ends_at=clock(9, 5),
+                    is_teaching=False,
+                ),
+                TimetablePeriod(
+                    school_code="MAIN",
+                    period_number=3,
+                    name_en="Period 3",
+                    name_ar="حصة ٣",
+                    starts_at=clock(9, 5),
+                    ends_at=clock(9, 50),
+                ),
             ],
         )
-        uow.timetable.upsert_entries([
-            TimetableEntry(
-                slot=TimetableSlot(class_code="3A", term_code=TERM,
-                                   day_of_week="sunday", period_number=1),
-                academic_year_code="2025-2026", subject_code="MATH"),
-            # A stated free period: the class deliberately has this slot off, which is a
-            # different fact from nobody having planned it. It must survive as a row.
-            TimetableEntry(
-                slot=TimetableSlot(class_code="3A", term_code=TERM,
-                                   day_of_week="monday", period_number=3),
-                academic_year_code="2025-2026", subject_code=None),
-            TimetableEntry(
-                slot=TimetableSlot(class_code="3B", term_code=TERM,
-                                   day_of_week="monday", period_number=1),
-                academic_year_code="2025-2026", subject_code="SCI"),
-        ])
+        uow.timetable.upsert_entries(
+            [
+                TimetableEntry(
+                    slot=TimetableSlot(
+                        class_code="3A", term_code=TERM, day_of_week="sunday", period_number=1
+                    ),
+                    academic_year_code="2025-2026",
+                    subject_code="MATH",
+                ),
+                # A stated free period: the class deliberately has this slot off, which is a
+                # different fact from nobody having planned it. It must survive as a row.
+                TimetableEntry(
+                    slot=TimetableSlot(
+                        class_code="3A", term_code=TERM, day_of_week="monday", period_number=3
+                    ),
+                    academic_year_code="2025-2026",
+                    subject_code=None,
+                ),
+                TimetableEntry(
+                    slot=TimetableSlot(
+                        class_code="3B", term_code=TERM, day_of_week="monday", period_number=1
+                    ),
+                    academic_year_code="2025-2026",
+                    subject_code="SCI",
+                ),
+            ]
+        )
         uow.commit()
 
 
@@ -443,9 +602,7 @@ def _seed_sis_api_keys() -> None:
 
 
 def _serve(app, port: str) -> uvicorn.Server:
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
-    )
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     threading.Thread(target=server.run, daemon=True).start()
     for _ in range(400):
         if server.started:
@@ -526,9 +683,7 @@ def estate(_own_the_environment):
     # the documented alternative to a JWKS URL and needs no third server.
     # The key the identity app will build for itself, built here so records can be
     # handed the public half before either process starts.
-    os.environ["IDENTITY_PUBLIC_KEY_PEM"] = signing_key_from(
-        identity_settings()
-    ).public_pem
+    os.environ["IDENTITY_PUBLIC_KEY_PEM"] = signing_key_from(identity_settings()).public_pem
 
     from records.app import app as records_app
 
@@ -663,19 +818,43 @@ def _deliver(client, wa_id: str, text: str, *, message_id: str = ""):
     message_id = message_id or _next_message_id()
     payload = {
         "object": "whatsapp_business_account",
-        "entry": [{"id": "waba", "changes": [{"field": "messages", "value": {
-            "messaging_product": "whatsapp",
-            "metadata": {"display_phone_number": "201288339613", "phone_number_id": "pn"},
-            "contacts": [{"profile": {"name": "فاطمة علي"}, "wa_id": wa_id}],
-            "messages": [{"from": wa_id, "id": message_id, "timestamp": "1",
-                          "type": "text", "text": {"body": text}}]}}]}],
+        "entry": [
+            {
+                "id": "waba",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "metadata": {
+                                "display_phone_number": "201288339613",
+                                "phone_number_id": "pn",
+                            },
+                            "contacts": [{"profile": {"name": "فاطمة علي"}, "wa_id": wa_id}],
+                            "messages": [
+                                {
+                                    "from": wa_id,
+                                    "id": message_id,
+                                    "timestamp": "1",
+                                    "type": "text",
+                                    "text": {"body": text},
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ],
     }
     # ensure_ascii=False so Arabic travels as UTF-8, which is what Meta sends and what the
     # signature has to be computed over.
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     signature = hmac.new(APP_SECRET.encode(), raw, hashlib.sha256).hexdigest()
-    return client.post("/v1/auth/whatsapp/webhook", content=raw, headers={
-        "X-Hub-Signature-256": f"sha256={signature}", "Content-Type": "application/json"})
+    return client.post(
+        "/v1/auth/whatsapp/webhook",
+        content=raw,
+        headers={"X-Hub-Signature-256": f"sha256={signature}", "Content-Type": "application/json"},
+    )
 
 
 def _sign_in(identity, gateway, wa_id: str, *, message_id: str = "") -> dict:
@@ -686,8 +865,9 @@ def _sign_in(identity, gateway, wa_id: str, *, message_id: str = "") -> dict:
     )
     assert delivered.status_code == 200
     code = "".join(c for c in gateway.sent[-1][1] if c.isdigit())
-    verified = identity.post("/v1/auth/whatsapp/verify",
-                             json={"poll_secret": started["poll_secret"], "code": code})
+    verified = identity.post(
+        "/v1/auth/whatsapp/verify", json={"poll_secret": started["poll_secret"], "code": code}
+    )
     assert verified.status_code == 200, verified.text
     return verified.json()
 
@@ -773,7 +953,7 @@ class TestSigningIn:
 
     def test_an_unsigned_webhook_is_refused(self, identity, gateway):
         """The webhook is public. Without the signature anyone could claim any number."""
-        started = identity.post("/v1/auth/whatsapp/start").json()
+        identity.post("/v1/auth/whatsapp/start").json()
         before = len(gateway.sent)
 
         unsigned = identity.post(
@@ -805,9 +985,7 @@ class TestWhatAParentCanRead:
 
         assert [row["student_id"] for row in body["students"]] == ["S001"]
 
-    def test_an_unmarked_subject_is_null_and_a_zero_is_a_zero(
-        self, identity, gateway, agent_key
-    ):
+    def test_an_unmarked_subject_is_null_and_a_zero_is_a_zero(self, identity, gateway, agent_key):
         """The invariant the whole estate is built around, checked at the far end.
 
         Zero is a mark a child earned. "Not marked yet" is not a mark at all. Anywhere the
@@ -844,7 +1022,9 @@ class TestWhatAParentCanRead:
 
         assert len(body["courses"]) == 3
         assert {c["subject_name_ar"] for c in body["courses"]} == {
-            "الرياضيات", "اللغة العربية", "العلوم"
+            "الرياضيات",
+            "اللغة العربية",
+            "العلوم",
         }
 
     def test_each_child_has_her_own_marks(self, identity, gateway, agent_key):
@@ -861,9 +1041,7 @@ class TestWhatAParentCanRead:
             "MATH": 61.0
         }
 
-    def test_attendance_counts_an_excused_day_as_attended(
-        self, identity, gateway, agent_key
-    ):
+    def test_attendance_counts_an_excused_day_as_attended(self, identity, gateway, agent_key):
         """Where the two services genuinely disagree, and this contract's answer wins.
 
         SIS's `in_the_room` is present-plus-late. This contract counts excused as
@@ -897,9 +1075,7 @@ class TestWhatAParentCanRead:
         assert body["course"]["subject_name_ar"] == "الرياضيات"
         assert body["course"]["computed_percentage"] == 88.5
 
-    def test_her_child_s_week_arrives_named_and_whole(
-        self, identity, gateway, agent_key
-    ):
+    def test_her_child_s_week_arrives_named_and_whole(self, identity, gateway, agent_key):
         """The timetable across all four hops, and the class resolved on the far side.
 
         The parent asks about a child. Nothing in the request names a room — this service
@@ -1035,9 +1211,7 @@ class TestWhatAParentCanRead:
         # The teacher who left is absent, so a parent is not sent to ask for him.
         assert "أ. فريد" not in {t["full_name_ar"] for t in body["teachers"]}
 
-    def test_no_teacher_contact_detail_survives_the_four_hops(
-        self, identity, gateway, agent_key
-    ):
+    def test_no_teacher_contact_detail_survives_the_four_hops(self, identity, gateway, agent_key):
         """Every seeded teacher HAS an email and a phone, so this asserts the projection.
 
         The shape is the privacy boundary. If a future adapter or route started copying
@@ -1056,9 +1230,7 @@ class TestWhatAParentCanRead:
         assert "+201009998888" not in raw
         assert "T-001" not in raw
 
-    def test_each_family_gets_its_own_room_s_teachers(
-        self, identity, gateway, agent_key
-    ):
+    def test_each_family_gets_its_own_room_s_teachers(self, identity, gateway, agent_key):
         """Proof the staff list is keyed on the ROOM and not on the rung.
 
         3A and 3B are both rung 3 and both teach maths with different teachers. A query
@@ -1084,9 +1256,7 @@ class TestWhatAParentCanRead:
             ("MATH", "أ. خالد")
         ]
 
-    def test_the_term_is_named_from_the_school_s_own_calendar(
-        self, identity, gateway, agent_key
-    ):
+    def test_the_term_is_named_from_the_school_s_own_calendar(self, identity, gateway, agent_key):
         session = _sign_in(identity, gateway, MOTHER_WA)
 
         with _parent_client(session["access_token"], agent_key) as parent:
@@ -1122,9 +1292,7 @@ class TestWhatAParentCannotRead:
         assert not_hers.status_code == no_such.status_code == 404
         assert not_hers.json()["detail"] == no_such.json()["detail"]
 
-    def test_a_guardian_barred_by_a_court_order_reads_nothing(
-        self, identity, gateway, agent_key
-    ):
+    def test_a_guardian_barred_by_a_court_order_reads_nothing(self, identity, gateway, agent_key):
         """He is a real guardian, on file, and linked to her. He may not read her records.
 
         Restricted and unknown look identical from here, deliberately: a caller able to
@@ -1142,9 +1310,7 @@ class TestWhatAParentCannotRead:
         assert children["students"] == []
         assert marks.status_code == 404
 
-    def test_a_barred_guardian_cannot_read_her_timetable_either(
-        self, identity, gateway, agent_key
-    ):
+    def test_a_barred_guardian_cannot_read_her_timetable_either(self, identity, gateway, agent_key):
         """The restriction has to hold on every parent-facing read, not most of them.
 
         Where a child is at eleven on Tuesday is, if anything, the most sensitive of the
@@ -1210,9 +1376,7 @@ class TestWhatAParentCannotRead:
 
         assert refused.status_code == 401
 
-    def test_one_parent_s_token_cannot_ask_about_another_parent(
-        self, identity, gateway, agent_key
-    ):
+    def test_one_parent_s_token_cannot_ask_about_another_parent(self, identity, gateway, agent_key):
         """The signed claim has to match the guardian named in the path.
 
         This is what stops a compromised chat backend from reading a family it holds no
@@ -1259,10 +1423,8 @@ class TestWhatAParentCannotRead:
 class TestWhenSomethingIsDown:
     """A service that cannot answer must never be rendered as an answer."""
 
-    def test_an_unreachable_school_does_not_become_no_children(
-        self, identity, gateway, agent_key
-    ):
-        """"Not registered" and "we cannot reach the records" are different sentences.
+    def test_an_unreachable_school_does_not_become_no_children(self, identity, gateway, agent_key):
+        """ "Not registered" and "we cannot reach the records" are different sentences.
 
         Telling a real parent they are unknown because another service blinked is worse
         than telling them to try again.
@@ -1298,8 +1460,9 @@ class TestWhenSomethingIsDown:
         try:
             started = identity.post("/v1/auth/whatsapp/start").json()
             _deliver(identity, MOTHER_WA, started["message"], message_id="wamid.DOWN")
-            status = identity.post("/v1/auth/whatsapp/status",
-                                   json={"poll_secret": started["poll_secret"]}).json()
+            status = identity.post(
+                "/v1/auth/whatsapp/status", json={"poll_secret": started["poll_secret"]}
+            ).json()
         finally:
             identity.app.state.channels = healthy
 
@@ -1345,9 +1508,7 @@ class TestTheRegistrarChangesSomething:
             )
             assert revoked.status_code == 200, revoked.text
             try:
-                after = parent.get(
-                    f"/v1/guardians/{session['guardian_id']}/students"
-                ).json()
+                after = parent.get(f"/v1/guardians/{session['guardian_id']}/students").json()
                 marks = parent.get(
                     f"/v1/guardians/{session['guardian_id']}/students/S001/grades",
                     params={"term": TERM},
@@ -1382,9 +1543,7 @@ class TestTheRegistrarChangesSomething:
         assert preview.status_code == 200, preview.text
         assert preview.json()["ok_count"] == 1
 
-        committed = sis_client.post(
-            f"/v1/imports/guardians/{preview.json()['batch_id']}/commit"
-        )
+        committed = sis_client.post(f"/v1/imports/guardians/{preview.json()['batch_id']}/commit")
         assert committed.status_code == 200, committed.text
 
         session = _sign_in(identity, gateway, "201234567890", message_id="wamid.NEW")

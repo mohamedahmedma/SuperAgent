@@ -20,6 +20,7 @@ using a chat session they are already signed in to.
 It **fails closed**. With no verification material configured, authentication fails rather
 than falling back to anything.
 """
+
 import os
 
 from schoolauth import (

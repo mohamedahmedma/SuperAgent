@@ -1,4 +1,5 @@
 """Append-only ORM mutation capture for the SIS record of truth."""
+
 from __future__ import annotations
 
 from contextvars import ContextVar
@@ -68,10 +69,20 @@ def record_mutations(session: Session, _flush_context, _instances) -> None:  # n
         ):
             continue
         before, after = _snapshot(obj, old=True), _snapshot(obj)
-        action = "restore" if before.get("is_active") is False and after.get("is_active") is True else (
-            "soft_delete" if before.get("is_active") is True and after.get("is_active") is False else "update"
+        action = (
+            "restore"
+            if before.get("is_active") is False and after.get("is_active") is True
+            else (
+                "soft_delete"
+                if before.get("is_active") is True and after.get("is_active") is False
+                else "update"
+            )
         )
-        if type(obj) is m.StudentDocument and before.get("deleted_at") is None and after.get("deleted_at") is not None:
+        if (
+            type(obj) is m.StudentDocument
+            and before.get("deleted_at") is None
+            and after.get("deleted_at") is not None
+        ):
             action = "soft_delete"
         entries.append((action, obj, before, after))
     for obj in tuple(session.deleted):
@@ -84,10 +95,16 @@ def record_mutations(session: Session, _flush_context, _instances) -> None:  # n
         for action, obj, old, new in entries:
             identity = inspect(obj).identity
             entity_id = ":".join(str(v) for v in identity) if identity else "pending"
-            session.add(m.AuditLog(
-                actor_user_id=actor_user_id, actor=actor[:64], action=action,
-                entity_type=type(obj).__name__, entity_id=entity_id,
-                old_values=old, new_values=new,
-            ))
+            session.add(
+                m.AuditLog(
+                    actor_user_id=actor_user_id,
+                    actor=actor[:64],
+                    action=action,
+                    entity_type=type(obj).__name__,
+                    entity_id=entity_id,
+                    old_values=old,
+                    new_values=new,
+                )
+            )
     finally:
         session.info["audit_flushing"] = False

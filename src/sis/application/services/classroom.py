@@ -29,7 +29,8 @@ Flattened together they become "your daughter has no teachers", which is false i
 the three cases and alarming in all of them. The read model keeps them apart and the API
 keeps them apart; see `StudentClassroom`.
 """
-from collections.abc import Callable, Sequence
+
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from sis.application.ports.repositories import SectionTeacher
@@ -93,9 +94,7 @@ class ClassroomService:
     def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:
         self._uow_factory = uow_factory
 
-    def for_student(
-        self, student_number: StudentNumber, term_code: TermCode
-    ) -> StudentClassroom:
+    def for_student(self, student_number: StudentNumber, term_code: TermCode) -> StudentClassroom:
         """Her room for that term, with what it studies and who teaches it.
 
         Structurally the same read as `TimetableService.week_for_student`, and deliberately
@@ -110,26 +109,20 @@ class ClassroomService:
         """
         with self._uow_factory() as uow:
             if uow.students.get(student_number) is None:
-                raise UnknownReference(
-                    f"no student {student_number}", field="student_number"
-                )
+                raise UnknownReference(f"no student {student_number}", field="student_number")
             term = uow.terms.get(term_code)
             if term is None:
                 raise UnknownReference(f"no term {term_code}", field="term_code")
             # The term's own year. A term whose year is missing is a broken foreign key
             # rather than a state to answer around.
-            year = uow.academic_years.get(
-                AcademicYearCode(str(term.academic_year_code))
-            )
+            year = uow.academic_years.get(AcademicYearCode(str(term.academic_year_code)))
             if year is None:
                 raise UnknownReference(
                     f"no academic year {term.academic_year_code}",
                     field="academic_year_code",
                 )
 
-            section = resolve_section_for_term(
-                uow.enrolments, student_number, term, year
-            )
+            section = resolve_section_for_term(uow.enrolments, student_number, term, year)
             if section is None:
                 return StudentClassroom(
                     student_number=str(student_number),
@@ -142,9 +135,7 @@ class ClassroomService:
             # The rung, for its human name. Absent rather than fatal: a class pointing at a
             # rung the ladder does not have is broken data, and it must not cost a parent
             # the class name, the subjects and the teachers as well.
-            level = uow.year_levels.get(
-                level_code, SchoolCode(str(year.school_code))
-            )
+            level = uow.year_levels.get(level_code, SchoolCode(str(year.school_code)))
             # The assignment board, not the year's whole catalogue: a school teaches
             # Physics, but only Secondary sits it. Already in `display_order`.
             subjects = tuple(

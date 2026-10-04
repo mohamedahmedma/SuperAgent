@@ -20,6 +20,7 @@ as in `sis.domain.errors`.
 Everything here is a dataclass. Pydantic lives in `api/` and only there; these types are
 what the service unit tests construct by hand, and they must stay cheap to construct.
 """
+
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -322,9 +323,7 @@ class Page[ItemT]:
     def of(
         cls, items: Iterable[ItemT], total: int, request: PageRequest | None = None
     ) -> "Page[ItemT]":
-        return cls(
-            items=tuple(items), total=total, request=request or PageRequest()
-        )
+        return cls(items=tuple(items), total=total, request=request or PageRequest())
 
     @classmethod
     def empty(cls, request: PageRequest | None = None) -> "Page[ItemT]":

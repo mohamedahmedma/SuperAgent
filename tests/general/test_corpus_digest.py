@@ -16,21 +16,22 @@ production:
   * Match scores were shown to the model with no scale. 0.31 reads as "nothing matched"
     unless you know what this corpus typically scores.
 """
+
 import unittest
 from unittest.mock import patch
 
+from backend.agent.rag.scope_index import (
+    build_index,
+    derive_floor,
+    floor_fingerprint,
+)
 from backend.indexing.section_summary import (
     DIGEST_INPUT_BUDGET,
     SectionRecord,
     build_corpus_digest,
     sections_fingerprint,
 )
-from backend.agent.prompts import render
-from backend.agent.rag.scope_index import (
-    build_index,
-    derive_floor,
-    floor_fingerprint,
-)
+from backend.prompts import render
 
 
 def unit(index, dimension=8):
@@ -91,7 +92,9 @@ class BlockedFloorTests(unittest.TestCase):
         for budget in (64, 512, 4096, 1 << 20):
             with self.subTest(block_bytes=budget):
                 with patch("backend.agent.rag.scope_index.FLOOR_BLOCK_BYTES", budget):
-                    self.assertAlmostEqual(expected, derive_floor(vectors, chunk_ids, 10.0), places=6)
+                    self.assertAlmostEqual(
+                        expected, derive_floor(vectors, chunk_ids, 10.0), places=6
+                    )
 
     def test_a_single_row_block_still_agrees(self):
         """The degenerate blocking: one row at a time."""
@@ -122,12 +125,16 @@ class FloorCacheTests(unittest.TestCase):
 
     def test_a_matching_fingerprint_skips_the_derivation(self):
         index = build_index(
-            self.records(), embed=self.embed(), embedding_model="m",
+            self.records(),
+            embed=self.embed(),
+            embedding_model="m",
             cached_floor=("", 0.0),
         )
         with patch("backend.agent.rag.scope_index.derive_floor") as derive:
             reused = build_index(
-                self.records(), embed=self.embed(), embedding_model="m",
+                self.records(),
+                embed=self.embed(),
+                embedding_model="m",
                 cached_floor=(index.floor_sha256, 0.4242),
             )
         derive.assert_not_called()
@@ -136,7 +143,9 @@ class FloorCacheTests(unittest.TestCase):
     def test_a_stale_fingerprint_is_ignored_not_trusted(self):
         fresh = build_index(self.records(), embed=self.embed(), embedding_model="m")
         stale = build_index(
-            self.records(), embed=self.embed(), embedding_model="m",
+            self.records(),
+            embed=self.embed(),
+            embedding_model="m",
             cached_floor=("not-the-right-hash", 0.9999),
         )
         self.assertEqual(fresh.floor, stale.floor)
@@ -269,14 +278,21 @@ class CorpusDigestTests(unittest.TestCase):
         def invoke(prompt):
             raise RuntimeError("provider down")
 
-        self.assertEqual("", build_corpus_digest([record("s1", summary="Admissions.")], invoke=invoke))
+        self.assertEqual(
+            "", build_corpus_digest([record("s1", summary="Admissions.")], invoke=invoke)
+        )
 
     def test_sections_without_a_summary_are_not_described(self):
-        self.assertEqual("", build_corpus_digest([record("s1", summary="  ")], invoke=lambda p: "x"))
+        self.assertEqual(
+            "", build_corpus_digest([record("s1", summary="  ")], invoke=lambda p: "x")
+        )
 
     def test_the_default_budget_takes_a_realistic_corpus_in_one_call(self):
         """A 200-section corpus of one-sentence summaries should not need reducing."""
-        records = [record(f"s{i}", summary="A section about school fees and payment dates.") for i in range(200)]
+        records = [
+            record(f"s{i}", summary="A section about school fees and payment dates.")
+            for i in range(200)
+        ]
         calls = []
         build_corpus_digest(records, invoke=lambda p: calls.append(p) or "ok")
         self.assertLessEqual(sum(len(r.summary) for r in records), DIGEST_INPUT_BUDGET * 2)
@@ -289,7 +305,9 @@ class ScopePromptTests(unittest.TestCase):
     def prompt(self, **overrides):
         settings = {
             "question": "when does term two start?",
-            "matches": [{"question": "when does the term begin?", "score": 0.42, "above_floor": True}],
+            "matches": [
+                {"question": "when does the term begin?", "score": 0.42, "above_floor": True}
+            ],
             "catalogue": "Covers admissions, fees and term dates for the school.",
             "persona": "a school",
             "history": "",
@@ -311,7 +329,9 @@ class ScopePromptTests(unittest.TestCase):
         self.assertIn("below", text)
 
     def test_the_paragraph_is_rendered_whole(self):
-        text = self.prompt(catalogue="A paragraph naming term dates, uniform suppliers and bus routes.")
+        text = self.prompt(
+            catalogue="A paragraph naming term dates, uniform suppliers and bus routes."
+        )
         self.assertIn("uniform suppliers and bus routes", text)
 
     def test_a_failed_search_is_reported_as_a_search_failure(self):
@@ -325,8 +345,8 @@ class ScopePromptTests(unittest.TestCase):
         text = self.prompt()
         self.assertIn("in_domain", text)
         self.assertIn("out_of_domain", text)
-        self.assertIn("الطقس", text)          # an Arabic out-of-domain example
-        self.assertIn("الفصل الدراسي", text)   # an Arabic in-domain example
+        self.assertIn("الطقس", text)  # an Arabic out-of-domain example
+        self.assertIn("الفصل الدراسي", text)  # an Arabic in-domain example
 
     def test_personal_fields_survive(self):
         self.assertIn("child_name", self.prompt())

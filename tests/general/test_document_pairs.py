@@ -7,6 +7,7 @@ Every test asserts correct behaviour. The four routing cases in
 `LanguageRoutingTests` are the specification — if one of them changes, the feature has
 changed, not the test.
 """
+
 import unittest
 from unittest.mock import patch
 
@@ -22,7 +23,9 @@ class PairStoreTestCase(unittest.TestCase):
     """Each test gets its own service over an empty table, in its own Postgres schema."""
 
     def setUp(self):
-        self.pairs = DocumentPairService(unit_of_work=postgres_schema(self, DocumentPair).unit_of_work)
+        self.pairs = DocumentPairService(
+            unit_of_work=postgres_schema(self, DocumentPair).unit_of_work
+        )
         # `language_filter_clause` resolves its service from the process container;
         # point that at this test's own.
         set_default_services(Services(document_pairs=self.pairs))
@@ -199,10 +202,12 @@ class FigureAwareRoutingTests(PairStoreTestCase):
         self.assets = schema.sessionmaker(autoflush=False)
         # Replaces the container the base class installed, adding the asset store the
         # figure-aware rule reads.
-        set_default_services(Services(
-            document_pairs=self.pairs,
-            asset_store=AssetStore(unit_of_work=schema.unit_of_work, cache_enabled=False),
-        ))
+        set_default_services(
+            Services(
+                document_pairs=self.pairs,
+                asset_store=AssetStore(unit_of_work=schema.unit_of_work, cache_enabled=False),
+            )
+        )
 
     def _figures(self, filename, *hashes, stored=True):
         """Give `filename` one image per hash. `stored=False` writes a row whose bytes
@@ -212,12 +217,14 @@ class FigureAwareRoutingTests(PairStoreTestCase):
         session = self.assets()
         try:
             for index, sha in enumerate(hashes):
-                session.add(DocumentAsset(
-                    asset_id=f"{filename}::p0::img{index}",
-                    sha256=sha,
-                    filename=filename,
-                    storage_uri=f"file://{sha[:2]}/{sha}.png" if stored else "",
-                ))
+                session.add(
+                    DocumentAsset(
+                        asset_id=f"{filename}::p0::img{index}",
+                        sha256=sha,
+                        filename=filename,
+                        storage_uri=f"file://{sha[:2]}/{sha}.png" if stored else "",
+                    )
+                )
             session.commit()
         finally:
             session.close()
@@ -319,11 +326,11 @@ class FigureAwarenessDegradationTests(PairStoreTestCase):
         self.pairs.attach(pair_id, ENGLISH, "uniform_en.docx")
 
     def test_assets_disabled_by_profile_uses_the_plain_rule(self):
-        from backend.agent.profiles.registry import load_profile
+        from backend.profiles.registry import load_profile
 
         profile = load_profile("base")
         profile.assets.enabled = False
-        with patch("backend.agent.profiles.get_profile", return_value=profile):
+        with patch("backend.profiles.get_profile", return_value=profile):
             self._pair()
             self.assertEqual(["uniform_en.docx"], self.pairs.superseded_filenames(ARABIC))
 

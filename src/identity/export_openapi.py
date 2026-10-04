@@ -6,6 +6,7 @@ Committed on purpose, for the same reason as the records contract: it is what an
 integrator reads, so a change to it should be a reviewable diff rather than a
 surprise at runtime.
 """
+
 import json
 import pathlib
 

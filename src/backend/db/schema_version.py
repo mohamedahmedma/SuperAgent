@@ -12,6 +12,7 @@ does not upgrade on boot. Two processes starting together would race on the same
 the upgrade is its own step — the container runs it before uvicorn starts, under the
 advisory lock `migrations/env.py` takes.
 """
+
 from __future__ import annotations
 
 import logging

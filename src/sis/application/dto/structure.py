@@ -11,6 +11,7 @@ idempotency fix -- generation stops being safe to re-run for half the school.
 Everything here is a plain dataclass. The API layer owns pydantic; a DTO that inherited
 from `BaseModel` would make these services untestable without a request object.
 """
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from string import ascii_uppercase
@@ -173,8 +174,7 @@ class GenerateStructureCommand:
                 field="classes_per_year",
             )
         return tuple(
-            (YearCode(self.year_code_template.format(n=n)), per_year)
-            for n in range(1, years + 1)
+            (YearCode(self.year_code_template.format(n=n)), per_year) for n in range(1, years + 1)
         )
 
 

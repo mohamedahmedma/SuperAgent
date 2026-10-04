@@ -1,4 +1,5 @@
 """Stage 12: grade-scoped reads and eligible teacher-to-class assignment."""
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -22,8 +23,11 @@ def grade_supervisor(client: TestClient, ids: dict[str, int]) -> dict[str, str]:
     with SqlAlchemyUnitOfWork() as uow:
         user_id = _make_user(uow._session, "grade.supervisor.12", school_id=ids["school"])
         _grant(
-            uow._session, user_id, RoleCode.YEAR_SUPERVISOR,
-            ScopeType.YEAR_LEVEL, ids["level_p1"],
+            uow._session,
+            user_id,
+            RoleCode.YEAR_SUPERVISOR,
+            ScopeType.YEAR_LEVEL,
+            ids["level_p1"],
         )
         uow.commit()
     return _sign_in(client, "grade.supervisor.12")
@@ -36,12 +40,14 @@ def eligible_teacher(client: TestClient, registrar: dict[str, str], school: None
         headers=registrar,
         json={
             "full_name_en": "Eligible Mathematics Teacher",
-            "assignments": [{
-                "academic_year_code": YEAR,
-                "subject_code": "MATH",
-                "year_level_code": "AR-P1",
-                "class_codes": ["P1A"],
-            }],
+            "assignments": [
+                {
+                    "academic_year_code": YEAR,
+                    "subject_code": "MATH",
+                    "year_level_code": "AR-P1",
+                    "class_codes": ["P1A"],
+                }
+            ],
         },
     )
     assert response.status_code == 200, response.text
@@ -51,20 +57,29 @@ def test_supervisor_reads_only_the_assigned_grade_classes(
     client: TestClient, grade_supervisor: dict[str, str]
 ) -> None:
     allowed = client.get(
-        "/v1/structure/classes", headers=grade_supervisor,
+        "/v1/structure/classes",
+        headers=grade_supervisor,
         params={"academic_year": YEAR, "year_level": "AR-P1"},
     )
     assert allowed.status_code == 200, allowed.text
     assert {row["code"] for row in allowed.json()} == {"P1A", "P1B"}
 
-    assert client.get(
-        "/v1/structure/classes", headers=grade_supervisor,
-        params={"academic_year": YEAR, "year_level": "AR-S1"},
-    ).status_code == 403
-    assert client.get(
-        "/v1/structure/classes", headers=grade_supervisor,
-        params={"academic_year": YEAR},
-    ).status_code == 403
+    assert (
+        client.get(
+            "/v1/structure/classes",
+            headers=grade_supervisor,
+            params={"academic_year": YEAR, "year_level": "AR-S1"},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get(
+            "/v1/structure/classes",
+            headers=grade_supervisor,
+            params={"academic_year": YEAR},
+        ).status_code
+        == 403
+    )
 
 
 def test_assignment_flow_lists_only_eligible_teachers_and_updates_selected_classes(
@@ -72,7 +87,8 @@ def test_assignment_flow_lists_only_eligible_teachers_and_updates_selected_class
 ) -> None:
     path = f"/v1/schools/{SCHOOL}/grades/AR-P1/teacher-assignment-options"
     options = client.get(
-        path, headers=grade_supervisor,
+        path,
+        headers=grade_supervisor,
         params={"academic_year": YEAR, "subject": "MATH"},
     )
     assert options.status_code == 200, options.text
@@ -83,8 +99,10 @@ def test_assignment_flow_lists_only_eligible_teachers_and_updates_selected_class
         f"/v1/schools/{SCHOOL}/grades/AR-P1/teacher-class-assignments",
         headers=grade_supervisor,
         json={
-            "academic_year_code": YEAR, "subject_code": "MATH",
-            "staff_number": "T-12", "class_codes": ["P1A", "P1B"],
+            "academic_year_code": YEAR,
+            "subject_code": "MATH",
+            "staff_number": "T-12",
+            "class_codes": ["P1A", "P1B"],
         },
     )
     assert assigned.status_code == 200, assigned.text
@@ -96,25 +114,27 @@ def test_supervisor_cannot_assign_or_list_an_unrelated_grade(
 ) -> None:
     refused = client.get(
         f"/v1/schools/{SCHOOL}/grades/AR-S1/teacher-assignment-options",
-        headers=grade_supervisor, params={"academic_year": YEAR, "subject": "MATH"},
+        headers=grade_supervisor,
+        params={"academic_year": YEAR, "subject": "MATH"},
     )
     assert refused.status_code == 403
     # The broad teacher directory is school-wide and therefore unavailable to a
     # grade-scoped supervisor; eligible teachers come only from the scoped flow.
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/teachers", headers=grade_supervisor
-    ).status_code == 403
+    assert client.get(f"/v1/schools/{SCHOOL}/teachers", headers=grade_supervisor).status_code == 403
 
 
 def test_grade_supervisor_only_writes_the_timetable_in_their_scope(
     client: TestClient, grade_supervisor: dict[str, str]
 ) -> None:
-    permissions = set(client.get("/v1/auth/me", headers=grade_supervisor).json()["profile"]["permissions"])
+    permissions = set(
+        client.get("/v1/auth/me", headers=grade_supervisor).json()["profile"]["permissions"]
+    )
     assert "teachers.assign_classes" in permissions
     # Staff chat is communication, not school data: every staff role can send messages.
     # The set stays exact so any other write permission granted to the role still fails here.
     assert {permission for permission in permissions if permission.endswith(".write")} == {
-        "timetable.write", "chat.write"
+        "timetable.write",
+        "chat.write",
     }
     assert "system.manage" not in permissions
 
@@ -134,19 +154,30 @@ def teacher_of_two_grades(client: TestClient, registrar: dict[str, str], school:
     The whole point of the fixture. A teacher who only ever taught Primary 1 cannot show
     that the directory is filtered, because every honest answer looks the same.
     """
-    assert client.put(
-        f"/v1/schools/{SCHOOL}/teachers/T-BOTH",
-        headers=registrar,
-        json={
-            "full_name_en": "Teaches Two Grades",
-            "assignments": [
-                {"academic_year_code": YEAR, "subject_code": "MATH",
-                 "year_level_code": "AR-P1", "class_codes": ["P1A"]},
-                {"academic_year_code": YEAR, "subject_code": "PHYS",
-                 "year_level_code": "AR-S1", "class_codes": []},
-            ],
-        },
-    ).status_code == 200
+    assert (
+        client.put(
+            f"/v1/schools/{SCHOOL}/teachers/T-BOTH",
+            headers=registrar,
+            json={
+                "full_name_en": "Teaches Two Grades",
+                "assignments": [
+                    {
+                        "academic_year_code": YEAR,
+                        "subject_code": "MATH",
+                        "year_level_code": "AR-P1",
+                        "class_codes": ["P1A"],
+                    },
+                    {
+                        "academic_year_code": YEAR,
+                        "subject_code": "PHYS",
+                        "year_level_code": "AR-S1",
+                        "class_codes": [],
+                    },
+                ],
+            },
+        ).status_code
+        == 200
+    )
 
 
 def test_the_grade_directory_narrows_the_record_as_well_as_the_list(
@@ -182,21 +213,25 @@ def test_the_directory_is_refused_school_wide_and_on_an_unrelated_grade(
     client: TestClient, grade_supervisor: dict[str, str], teacher_of_two_grades: None
 ) -> None:
     """Naming no grade is a school-wide read, and a school-wide read is not held."""
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/teachers", headers=grade_supervisor
-    ).status_code == 403
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/teachers",
-        headers=grade_supervisor,
-        params={"year_level": "AR-S1"},
-    ).status_code == 403
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/teachers/T-BOTH", headers=grade_supervisor
-    ).status_code == 403
+    assert client.get(f"/v1/schools/{SCHOOL}/teachers", headers=grade_supervisor).status_code == 403
+    assert (
+        client.get(
+            f"/v1/schools/{SCHOOL}/teachers",
+            headers=grade_supervisor,
+            params={"year_level": "AR-S1"},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get(f"/v1/schools/{SCHOOL}/teachers/T-BOTH", headers=grade_supervisor).status_code
+        == 403
+    )
 
 
 def test_a_teacher_outside_the_grade_is_reported_as_no_such_teacher(
-    client: TestClient, grade_supervisor: dict[str, str], registrar: dict[str, str],
+    client: TestClient,
+    grade_supervisor: dict[str, str],
+    registrar: dict[str, str],
     school: None,
 ) -> None:
     """404, not 403 — and deliberately the same answer as a staff number that never was.
@@ -204,15 +239,24 @@ def test_a_teacher_outside_the_grade_is_reported_as_no_such_teacher(
     A supervisor who could tell "exists, but not yours" from "does not exist" could walk
     the staff numbers and learn who works at the school.
     """
-    assert client.put(
-        f"/v1/schools/{SCHOOL}/teachers/T-SEC",
-        headers=registrar,
-        json={
-            "full_name_en": "Secondary Only",
-            "assignments": [{"academic_year_code": YEAR, "subject_code": "PHYS",
-                             "year_level_code": "AR-S1", "class_codes": []}],
-        },
-    ).status_code == 200
+    assert (
+        client.put(
+            f"/v1/schools/{SCHOOL}/teachers/T-SEC",
+            headers=registrar,
+            json={
+                "full_name_en": "Secondary Only",
+                "assignments": [
+                    {
+                        "academic_year_code": YEAR,
+                        "subject_code": "PHYS",
+                        "year_level_code": "AR-S1",
+                        "class_codes": [],
+                    }
+                ],
+            },
+        ).status_code
+        == 200
+    )
 
     outside = client.get(
         f"/v1/schools/{SCHOOL}/teachers/T-SEC",
@@ -236,7 +280,8 @@ def test_the_registrar_still_reads_the_whole_school_directory(
     assert response.status_code == 200, response.text
     assert [row["staff_number"] for row in response.json()] == ["T-BOTH"]
     assert {row["year_level_code"] for row in response.json()[0]["assignments"]} == {
-        "AR-P1", "AR-S1"
+        "AR-P1",
+        "AR-S1",
     }
 
 
@@ -244,7 +289,9 @@ def test_the_registrar_still_reads_the_whole_school_directory(
 
 
 def test_the_whole_school_timetable_is_refused_and_one_grade_is_not(
-    client: TestClient, grade_supervisor: dict[str, str], registrar: dict[str, str],
+    client: TestClient,
+    grade_supervisor: dict[str, str],
+    registrar: dict[str, str],
     school: None,
 ) -> None:
     """The year-wide lesson list is a school-wide read, and it never checked that it was.
@@ -254,21 +301,33 @@ def test_the_whole_school_timetable_is_refused_and_one_grade_is_not(
     named for the grant to match, and naming it also filters what comes back.
     """
     assert _periods(client, registrar).status_code == 200
-    assert _place(
-        client, registrar,
-        [_lesson("P1A", "sunday", 1), _lesson("LGA", "sunday", 1, subject=None)],
-    ).status_code == 200
+    assert (
+        _place(
+            client,
+            registrar,
+            [_lesson("P1A", "sunday", 1), _lesson("LGA", "sunday", 1, subject=None)],
+        ).status_code
+        == 200
+    )
 
-    assert client.get(
-        "/v1/timetable", headers=grade_supervisor, params={"academic_year": YEAR}
-    ).status_code == 403
-    assert client.get(
-        "/v1/timetable", headers=grade_supervisor,
-        params={"academic_year": YEAR, "year_level": "LG-P1"},
-    ).status_code == 403
+    assert (
+        client.get(
+            "/v1/timetable", headers=grade_supervisor, params={"academic_year": YEAR}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get(
+            "/v1/timetable",
+            headers=grade_supervisor,
+            params={"academic_year": YEAR, "year_level": "LG-P1"},
+        ).status_code
+        == 403
+    )
 
     mine = client.get(
-        "/v1/timetable", headers=grade_supervisor,
+        "/v1/timetable",
+        headers=grade_supervisor,
         params={"academic_year": YEAR, "year_level": "AR-P1"},
     )
     assert mine.status_code == 200, mine.text

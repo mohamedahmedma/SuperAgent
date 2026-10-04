@@ -9,6 +9,7 @@ never entered has not taken a pooled connection. The session factory is a parame
 test can point one unit of work at its own schema; by default it is the process-wide
 `SessionLocal`, looked up at enter time.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

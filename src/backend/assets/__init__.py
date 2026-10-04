@@ -5,6 +5,7 @@ migration machinery. The extraction pipelines that populate a dossier's text and
 structured surfaces arrive in Phase 3 (figures) and Phase 5 (entities); they write
 through `AssetStore` and never touch these tables directly.
 """
+
 from backend.assets.blobs import (
     BlobStore,
     LocalBlobStore,

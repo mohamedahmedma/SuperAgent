@@ -32,6 +32,7 @@ progress step have to describe the narrowing that happened and never one that di
 because narrowing is invisible in the answer text and the trace is the only place a wrong
 one can be seen.
 """
+
 import unittest
 
 from backend.agent.chat import orchestrator
@@ -39,8 +40,10 @@ from backend.agent.chat.child_resolution import ResolvedChild, no_child
 from backend.agent.chat.child_roster import ChildOption
 from backend.agent.chat.signals import RequestSignals, Scope
 from backend.agent.chat.turn_policy import (
-    KNOWLEDGE_TOOL,
     GRADES_TOOL as RECORDS_TOOL,
+)
+from backend.agent.chat.turn_policy import (
+    KNOWLEDGE_TOOL,
     TurnPlan,
     _tools_for,
     resolve_turn,
@@ -161,9 +164,7 @@ def _expected(kind, state, tools, narrow):
 
 def _plan(child=None, *, agent=None, **signal_kwargs):
     signals = RequestSignals(question="q", **signal_kwargs)
-    return resolve_turn(
-        signals, agent_config=agent or _Agent(), copy_config=_Copy(), child=child
-    )
+    return resolve_turn(signals, agent_config=agent or _Agent(), copy_config=_Copy(), child=child)
 
 
 def _cells():
@@ -272,11 +273,11 @@ class TheNarrowedListIsAlwaysASubsetOfTheProfile(unittest.TestCase):
         """A deployment binding a tool outside both families must not have narrowing hand
         a records question a tool it did not ask for."""
         agent = _agent([KNOWLEDGE_TOOL, UNRELATED_TOOL, RECORDS_TOOL])
-        for kind, expected in (("records", [RECORDS_TOOL]),
-                               ("school_matter", [KNOWLEDGE_TOOL])):
+        for kind, expected in (("records", [RECORDS_TOOL]), ("school_matter", [KNOWLEDGE_TOOL])):
             with self.subTest(kind=kind):
-                plan = _plan(_resolved_child(), agent=agent, about_child=True,
-                             child_question_kind=kind)
+                plan = _plan(
+                    _resolved_child(), agent=agent, about_child=True, child_question_kind=kind
+                )
                 self.assertEqual(plan.exposed_tools, expected)
                 self.assertNotIn(UNRELATED_TOOL, plan.exposed_tools)
 
@@ -331,9 +332,7 @@ class TheForcedToolFollowsTheBoundList(unittest.TestCase):
                     about_child=state != "none",
                     child_question_kind=kind,
                 )
-                bound_exactly_one = (
-                    plan.exposed_tools is not None and len(plan.exposed_tools) == 1
-                )
+                bound_exactly_one = plan.exposed_tools is not None and len(plan.exposed_tools) == 1
                 self.assertEqual(bool(plan.forced_tool), bound_exactly_one)
 
     def test_a_turn_that_bound_everything_requires_nothing(self):
@@ -363,8 +362,9 @@ class NarrowingNeverResurrectsATool(unittest.TestCase):
     """The rungs above narrowing already unbound everything. It must not undo that."""
 
     def test_a_social_turn_binds_nothing_even_with_a_settled_child(self):
-        plan = _plan(_resolved_child(), is_social=True, about_child=True,
-                     child_question_kind="records")
+        plan = _plan(
+            _resolved_child(), is_social=True, about_child=True, child_question_kind="records"
+        )
         self.assertEqual(plan.exposed_tools, [])
         self.assertEqual(plan.forced_tool, "")
 
@@ -400,8 +400,12 @@ class NarrowingNeverResurrectsATool(unittest.TestCase):
         for kind in KINDS:
             for tools_name, tools in PROFILE_TOOLS.items():
                 with self.subTest(kind=kind, profile=tools_name):
-                    plan = _plan(_asking_child(), agent=_agent(tools), about_child=True,
-                                 child_question_kind=kind)
+                    plan = _plan(
+                        _asking_child(),
+                        agent=_agent(tools),
+                        about_child=True,
+                        child_question_kind=kind,
+                    )
                     self.assertTrue(plan.short_circuit)
                     self.assertEqual(plan.exposed_tools, [])
                     self.assertEqual(plan.forced_tool, "")
@@ -469,10 +473,11 @@ class TheTraceDescribesTheNarrowing(unittest.TestCase):
                 self.assertEqual(trace["turn_short_circuit"], plan.short_circuit)
 
     def test_binding_everything_is_reported_as_null_not_as_an_empty_list(self):
-        """"Bind everything" and "bind nothing" are opposite decisions. A trace that
+        """ "Bind everything" and "bind nothing" are opposite decisions. A trace that
         rendered both as `[]` would make a lost tool unreadable after the fact."""
-        everything = _plan(_resolved_child(), about_child=True,
-                           child_question_kind="both").as_trace()
+        everything = _plan(
+            _resolved_child(), about_child=True, child_question_kind="both"
+        ).as_trace()
         nothing = _plan(_resolved_child(), is_social=True).as_trace()
         self.assertIsNone(everything["turn_exposed_tools"])
         self.assertEqual(nothing["turn_exposed_tools"], [])

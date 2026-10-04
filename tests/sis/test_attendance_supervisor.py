@@ -16,6 +16,7 @@ reads an unnamed child as *not reached yet*, deliberately — that is what keeps
 register honest. `absent_unlisted` is the caller saying the pass is finished. The tests
 below pin both halves: that it fills every blank, and that it overwrites nothing.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -43,8 +44,11 @@ def roll(client: TestClient, registrar: dict[str, str], school: None) -> list[st
         assert client.post(
             "/v1/students",
             headers=registrar,
-            json={"student_number": number, "full_name_en": f"Child {index}",
-                  "full_name_ar": f"طفل {index}"},
+            json={
+                "student_number": number,
+                "full_name_en": f"Child {index}",
+                "full_name_ar": f"طفل {index}",
+            },
         ).status_code in (200, 201)
         assert client.post(
             f"/v1/students/{number}/placements",
@@ -62,8 +66,11 @@ def supervisor(client: TestClient, ids: dict[str, int]) -> dict[str, str]:
     with SqlAlchemyUnitOfWork() as uow:
         user_id = _make_user(uow._session, "register.taker", school_id=ids["school"])
         _grant(
-            uow._session, user_id, RoleCode.ATTENDANCE_SUPERVISOR,
-            ScopeType.CLASS_SECTION, ids["class_P1A"],
+            uow._session,
+            user_id,
+            RoleCode.ATTENDANCE_SUPERVISOR,
+            ScopeType.CLASS_SECTION,
+            ids["class_P1A"],
         )
         uow.commit()
     return _sign_in(client, "register.taker")
@@ -82,7 +89,8 @@ def test_a_class_scoped_supervisor_is_told_which_classes_they_hold(
     the assertion at the bottom and the reason this route exists.
     """
     response = client.get(
-        "/v1/attendance/classes", headers=supervisor,
+        "/v1/attendance/classes",
+        headers=supervisor,
         params={"academic_year": YEAR, "on": DAY},
     )
     assert response.status_code == 200, response.text
@@ -95,10 +103,14 @@ def test_a_class_scoped_supervisor_is_told_which_classes_they_hold(
     assert only["may_record"] is True
     assert (only["size"], only["marked"], only["is_complete"]) == (4, 0, False)
 
-    assert client.get(
-        "/v1/structure/classes", headers=supervisor,
-        params={"academic_year": YEAR, "year_level": "AR-P1"},
-    ).status_code == 403
+    assert (
+        client.get(
+            "/v1/structure/classes",
+            headers=supervisor,
+            params={"academic_year": YEAR, "year_level": "AR-P1"},
+        ).status_code
+        == 403
+    )
 
 
 def test_the_same_route_answers_a_school_wide_caller_with_the_school(
@@ -107,7 +119,8 @@ def test_the_same_route_answers_a_school_wide_caller_with_the_school(
     """One route for every scope. The answer is the union over the caller's grants, so a
     registrar is not a special case with a listing of its own."""
     response = client.get(
-        "/v1/attendance/classes", headers=registrar,
+        "/v1/attendance/classes",
+        headers=registrar,
         params={"academic_year": YEAR, "on": DAY},
     )
     assert response.status_code == 200, response.text
@@ -119,21 +132,27 @@ def test_the_listing_reports_the_day_a_register_has_reached(
 ) -> None:
     """Progress per class, which is what stops a day being recorded twice by somebody who
     could not otherwise tell it had been recorded once."""
-    assert client.put(
-        "/v1/classes/P1A/attendance", headers=supervisor,
-        params={"academic_year": YEAR, "on": DAY},
-        json={"entries": [{"student_number": roll[0], "state": "present"}]},
-    ).status_code == 200
+    assert (
+        client.put(
+            "/v1/classes/P1A/attendance",
+            headers=supervisor,
+            params={"academic_year": YEAR, "on": DAY},
+            json={"entries": [{"student_number": roll[0], "state": "present"}]},
+        ).status_code
+        == 200
+    )
 
     partial = client.get(
-        "/v1/attendance/classes", headers=supervisor,
+        "/v1/attendance/classes",
+        headers=supervisor,
         params={"academic_year": YEAR, "on": DAY},
     ).json()["classes"][0]
     assert (partial["marked"], partial["is_complete"]) == (1, False)
 
     # A different day is a different register, and is still untouched.
     other = client.get(
-        "/v1/attendance/classes", headers=supervisor,
+        "/v1/attendance/classes",
+        headers=supervisor,
         params={"academic_year": YEAR, "on": "2026-09-02"},
     ).json()["classes"][0]
     assert (other["marked"], other["is_complete"]) == (0, False)
@@ -147,7 +166,8 @@ def test_closing_the_register_records_every_unmarked_child_absent(
 ) -> None:
     """The workflow in one request: name the children in the room, and the rest are away."""
     response = client.put(
-        "/v1/classes/P1A/attendance", headers=supervisor,
+        "/v1/classes/P1A/attendance",
+        headers=supervisor,
         params={"academic_year": YEAR, "on": DAY},
         json={
             "entries": [{"student_number": roll[0], "state": "present"}],
@@ -171,17 +191,24 @@ def test_closing_fills_blanks_and_overwrites_nothing(
     Without this, the fastest button on the screen would quietly overwrite the one state
     that carries a typed reason, and a register cannot show afterwards that it did.
     """
-    assert client.put(
-        "/v1/classes/P1A/attendance", headers=supervisor,
-        params={"academic_year": YEAR, "on": DAY},
-        json={"entries": [
-            {"student_number": roll[0], "state": "excused", "note": "medical"},
-            {"student_number": roll[1], "state": "late"},
-        ]},
-    ).status_code == 200
+    assert (
+        client.put(
+            "/v1/classes/P1A/attendance",
+            headers=supervisor,
+            params={"academic_year": YEAR, "on": DAY},
+            json={
+                "entries": [
+                    {"student_number": roll[0], "state": "excused", "note": "medical"},
+                    {"student_number": roll[1], "state": "late"},
+                ]
+            },
+        ).status_code
+        == 200
+    )
 
     closed = client.put(
-        "/v1/classes/P1A/attendance", headers=supervisor,
+        "/v1/classes/P1A/attendance",
+        headers=supervisor,
         params={"academic_year": YEAR, "on": DAY},
         json={"entries": [], "absent_unlisted": True},
     )
@@ -201,11 +228,15 @@ def test_an_empty_register_is_still_refused_when_it_is_not_being_closed(
 
     The first has nothing to record and is refused, as it was before this flag existed.
     """
-    assert client.put(
-        "/v1/classes/P1A/attendance", headers=supervisor,
-        params={"academic_year": YEAR, "on": DAY},
-        json={"entries": []},
-    ).status_code == 422
+    assert (
+        client.put(
+            "/v1/classes/P1A/attendance",
+            headers=supervisor,
+            params={"academic_year": YEAR, "on": DAY},
+            json={"entries": []},
+        ).status_code
+        == 422
+    )
 
 
 # -- Editing, and not recording the same day twice ---------------------------
@@ -220,14 +251,18 @@ def test_recording_the_same_day_twice_leaves_one_row_per_child(
     become two statements about one morning however the client behaves.
     """
     for _ in range(3):
-        assert client.put(
-            "/v1/classes/P1A/attendance", headers=supervisor,
-            params={"academic_year": YEAR, "on": DAY},
-            json={
-                "entries": [{"student_number": roll[0], "state": "present"}],
-                "absent_unlisted": True,
-            },
-        ).status_code == 200
+        assert (
+            client.put(
+                "/v1/classes/P1A/attendance",
+                headers=supervisor,
+                params={"academic_year": YEAR, "on": DAY},
+                json={
+                    "entries": [{"student_number": roll[0], "state": "present"}],
+                    "absent_unlisted": True,
+                },
+            ).status_code
+            == 200
+        )
 
     with SqlAlchemyUnitOfWork() as uow:
         rows = uow._session.execute(
@@ -247,16 +282,21 @@ def test_recording_the_same_day_twice_leaves_one_row_per_child(
 def test_a_closed_register_is_still_editable_by_whoever_may_write_it(
     client: TestClient, supervisor: dict[str, str], roll: list[str]
 ) -> None:
-    """"Support editing according to the existing permission rules" — the permission rules
+    """ "Support editing according to the existing permission rules" — the permission rules
     being the ones already there: the write is scoped, and a closed day is not frozen."""
-    assert client.put(
-        "/v1/classes/P1A/attendance", headers=supervisor,
-        params={"academic_year": YEAR, "on": DAY},
-        json={"entries": [], "absent_unlisted": True},
-    ).status_code == 200
+    assert (
+        client.put(
+            "/v1/classes/P1A/attendance",
+            headers=supervisor,
+            params={"academic_year": YEAR, "on": DAY},
+            json={"entries": [], "absent_unlisted": True},
+        ).status_code
+        == 200
+    )
 
     corrected = client.put(
-        "/v1/classes/P1A/attendance", headers=supervisor,
+        "/v1/classes/P1A/attendance",
+        headers=supervisor,
         params={"academic_year": YEAR, "on": DAY},
         json={"entries": [{"student_number": roll[0], "state": "present"}]},
     )
@@ -270,7 +310,8 @@ def test_closing_a_register_is_refused_on_a_class_the_supervisor_was_not_given(
 ) -> None:
     """The new flag is not a way around the scope. It is the same route and the same check."""
     refused = client.put(
-        "/v1/classes/P1B/attendance", headers=supervisor,
+        "/v1/classes/P1B/attendance",
+        headers=supervisor,
         params={"academic_year": YEAR, "on": DAY},
         json={"entries": [], "absent_unlisted": True},
     )

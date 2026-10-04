@@ -30,6 +30,7 @@ This module holds the standard answers, one per failure:
 The transports that apply these rules to HTTP are in `backend/llm_http.py` (the chat
 models) and `backend/indexing/embedding.py` (the embedding provider, a second quota).
 """
+
 from __future__ import annotations
 
 import email.utils

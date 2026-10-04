@@ -19,6 +19,7 @@ The status codes are load-bearing and are asserted individually:
 Collapsing those two would tell a parent holding a valid token that their token is invalid,
 which sends them to re-authenticate in a loop that cannot succeed.
 """
+
 import pytest
 
 from tests.identity.conftest import BOOTSTRAP_ADMIN_PASSWORD, BOOTSTRAP_ADMIN_USER
@@ -128,9 +129,7 @@ class TestEverybodyElseIsTurnedAway:
             json={"username": "0505556666", "password": "correct-horse-battery"},
         ).json()["access_token"]
 
-        response = call(
-            client, method, path, body, {"Authorization": f"Bearer {token}"}
-        )
+        response = call(client, method, path, body, {"Authorization": f"Bearer {token}"})
 
         assert response.status_code == 403, response.text
 
@@ -225,9 +224,7 @@ class TestTheCredentialIsRevocable:
 
         db = new_session()
         try:
-            account = (
-                db.query(Account).filter(Account.username == BOOTSTRAP_ADMIN_USER).first()
-            )
+            account = db.query(Account).filter(Account.username == BOOTSTRAP_ADMIN_USER).first()
             account.is_active = False
             db.commit()
         finally:

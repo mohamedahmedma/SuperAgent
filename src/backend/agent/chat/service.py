@@ -9,6 +9,7 @@ The collaborators below stay module attributes on purpose. They are gathered int
 `TurnCollaborators` at call time, so a test that patches one of them here — the planner,
 the agent factory, a model — still reaches the turn it drives.
 """
+
 import asyncio
 import json
 import logging
@@ -16,7 +17,6 @@ import math
 
 from langchain_core.messages import AIMessageChunk, ToolMessage
 
-from backend.assets.delivery import ClientCapabilities
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.clarification import build_hitl_event, pending_resume_state
 from backend.agent.chat.finalize import Finalizer, visible_text
@@ -24,9 +24,15 @@ from backend.agent.chat.orchestrator import plan_turn, resolve_turn_question
 from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.resolution import ResolvedQuestion
 from backend.agent.chat.runtime import create_agent_for_request, model
-from backend.agent.chat.turn_pipeline import StreamedAnswer, TurnCollaborators, TurnPipeline, resolve_caller
+from backend.agent.chat.turn_pipeline import (
+    StreamedAnswer,
+    TurnCollaborators,
+    TurnPipeline,
+    resolve_caller,
+)
+from backend.assets.delivery import ClientCapabilities
 from backend.composition import Services, default_services
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +65,8 @@ def _agent_failure_text(exc: BaseException, language: str) -> str:
     it reached one parent in three (RAG_FIX_PLAN item 37). Anything else is shown as
     before.
     """
-    from backend.assets.vision import is_rate_limit_error, retry_after_seconds
     from backend.agent.chat.turn_policy import localized
+    from backend.assets.vision import is_rate_limit_error, retry_after_seconds
 
     if not is_rate_limit_error(exc):
         return str(exc)
@@ -99,18 +105,20 @@ def generate_session_title(user_text: str) -> str:
 def _pipeline(services: Services | None) -> TurnPipeline:
     """A turn pipeline over this module's collaborators, as they are at call time."""
     container = services or default_services()
-    return TurnPipeline(TurnCollaborators(
-        conversations=container.conversations,
-        background=container.background_jobs,
-        profile=_PROFILE,
-        plan=plan_turn,
-        resolve_question=resolve_turn_question,
-        create_agent=create_agent_for_request,
-        resume_retrieval=_resume_rag_from_hitl_sync,
-        answer_model=model,
-        session_title=generate_session_title,
-        context_type=ChatRequestContext,
-    ))
+    return TurnPipeline(
+        TurnCollaborators(
+            conversations=container.conversations,
+            background=container.background_jobs,
+            profile=_PROFILE,
+            plan=plan_turn,
+            resolve_question=resolve_turn_question,
+            create_agent=create_agent_for_request,
+            resume_retrieval=_resume_rag_from_hitl_sync,
+            answer_model=model,
+            session_title=generate_session_title,
+            context_type=ChatRequestContext,
+        )
+    )
 
 
 def chat_with_agent(
@@ -289,7 +297,9 @@ async def chat_with_agent_stream(
             # same `hitl_request` event the retrieval clarifications use.
             pipeline.settle_short_circuit(turn)
             if turn.title:
-                yield _event({"type": "session_title", "title": turn.title, "session_id": session_id})
+                yield _event(
+                    {"type": "session_title", "title": turn.title, "session_id": session_id}
+                )
             yield _event({"type": "content", "content": turn.answer})
             if turn.next_pending:
                 yield _event({"type": "hitl_request", "hitl": build_hitl_event(turn.next_pending)})
@@ -429,7 +439,9 @@ async def _hold_until_stored(pipeline: TurnPipeline, turn) -> str | None:
     if not await asyncio.to_thread(pipeline.wait_for_save, turn):
         logger.warning(
             "the save for %s/%s is still running after %.0fs; closing the stream without it",
-            turn.user_id, turn.session_id, pipeline.SAVE_WAIT_SECONDS,
+            turn.user_id,
+            turn.session_id,
+            pipeline.SAVE_WAIT_SECONDS,
         )
         return None
     ids = pipeline.stored_message_ids(turn)

@@ -21,6 +21,7 @@ shipped and read by more people than the database ever will be.
 supplies, so a service that decides "is this key still valid" is unit-testable with a
 fixed timestamp and no patching of `datetime`.
 """
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -95,9 +96,7 @@ class ApiKey:
             # single timezone-less column would turn every authenticated request into a
             # 500 rather than a refusal. Refuse it here, where the value is constructed.
             if moment is not None and moment.tzinfo is None:
-                raise ValidationError(
-                    f"{name} must be timezone-aware", field=name
-                )
+                raise ValidationError(f"{name} must be timezone-aware", field=name)
 
     def is_expired_at(self, now: datetime) -> bool:
         """`None` expiry means no expiry — a key that must be revoked deliberately."""

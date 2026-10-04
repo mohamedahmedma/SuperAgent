@@ -29,13 +29,14 @@ handler so it can be unit-tested without a database.
 The domain never reads the clock. Lockout and expiry are answered against a `now` the
 caller supplies.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Final
 from enum import StrEnum
+from typing import Final
 
 from sis.domain.errors import ValidationError
 from sis.domain.people import Gender

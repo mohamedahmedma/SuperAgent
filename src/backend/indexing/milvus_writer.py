@@ -12,6 +12,7 @@ reason. Enable with SEMANTIC_DEDUP_ENABLED=true, tune SEMANTIC_DEDUP_THRESHOLD.
 Dedup scope is one write_documents call (one document upload) — cross-file dedup
 would require querying the store and belongs to a future compaction job.
 """
+
 import hashlib
 import json
 import logging
@@ -20,7 +21,7 @@ import os
 from backend.env import env_bool, env_float
 from backend.indexing.embedding import EmbeddingService
 from backend.indexing.milvus_client import MilvusStore
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 from backend.text_matching import search_key
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,9 @@ def _max_cosine_similarity(embedding, kept_embeddings) -> float:
 class MilvusWriter:
     """Service that embeds documents and writes them to Milvus - supports hybrid retrieval"""
 
-    def __init__(self, embedding_service: EmbeddingService = None, milvus_manager: MilvusStore = None):
+    def __init__(
+        self, embedding_service: EmbeddingService = None, milvus_manager: MilvusStore = None
+    ):
         if embedding_service is None or milvus_manager is None:
             from backend.composition import default_services
 
@@ -61,7 +64,9 @@ class MilvusWriter:
         self.embedding_service = embedding_service
         self.milvus_manager = milvus_manager
         chunking = get_profile().chunking
-        self.semantic_dedup_enabled = env_bool("SEMANTIC_DEDUP_ENABLED", chunking.semantic_dedup_enabled)
+        self.semantic_dedup_enabled = env_bool(
+            "SEMANTIC_DEDUP_ENABLED", chunking.semantic_dedup_enabled
+        )
         self.semantic_dedup_threshold = env_float(
             "SEMANTIC_DEDUP_THRESHOLD", chunking.semantic_dedup_threshold
         )
@@ -100,7 +105,8 @@ class MilvusWriter:
                 for doc, dense_emb in zip(unique_batch, dense_embeddings):
                     if (
                         self.semantic_dedup_enabled
-                        and _max_cosine_similarity(dense_emb, kept_embeddings) >= self.semantic_dedup_threshold
+                        and _max_cosine_similarity(dense_emb, kept_embeddings)
+                        >= self.semantic_dedup_threshold
                     ):
                         semantic_skipped += 1
                         continue

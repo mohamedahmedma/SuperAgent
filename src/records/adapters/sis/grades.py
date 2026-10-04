@@ -25,13 +25,14 @@ binding's `lms_idnumber` must be the SIS **subject code** (`MATH`), because that
 reference SIS reports and `records.assembler` matches on it. An unbound subject is
 dropped, silently and deliberately, exactly as it is for Moodle.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from records.adapters.sis.http import PooledClient, REDIRECT_STATUSES, error_code
+from records.adapters.sis.http import REDIRECT_STATUSES, PooledClient, error_code
 from records.config import settings
 from records.domain.errors import LmsUnavailable
 from records.domain.marks import SubjectAttendance, SubjectGrade
@@ -246,8 +247,7 @@ class SisAdapter:
         from_date, to_date = window
 
         path = (
-            f"{self._guardian_path(guardian_ref)}"
-            f"/students/{quote(student_ref, safe='')}/attendance"
+            f"{self._guardian_path(guardian_ref)}/students/{quote(student_ref, safe='')}/attendance"
         )
         payload = self._get(path, {"from": from_date, "to": to_date})
         if payload is None:
@@ -356,9 +356,7 @@ class SisAdapter:
             # Same stated figure, not a copy of a different one: a SIS mark has no
             # attendance component to strip out. See the module docstring.
             academic_percentage=percentage,
-            academic_unavailable=(
-                "points_not_percentage" if graded and percentage is None else ""
-            ),
+            academic_unavailable=("points_not_percentage" if graded and percentage is None else ""),
             graded_count=1 if graded else 0,
             # SIS has no exclusion concept, so zero is a fact rather than a placeholder.
             excluded_count=0,

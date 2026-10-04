@@ -13,6 +13,7 @@ Design rules that the rest of the codebase relies on:
    (`profile.rag`), never the whole profile, so adding a field to one section cannot
    ripple into unrelated modules.
 """
+
 from __future__ import annotations
 
 from typing import Any, ClassVar, Dict, List, Literal, Optional, Sequence
@@ -133,7 +134,7 @@ class AgentConfig(_Section):
     """The tool-calling agent's contract."""
 
     # Empty means "use the shipped template", which is the normal case — the agent
-    # prompt is composed from backend/agent/prompts/templates/agent/system.j2 so that a turn
+    # prompt is composed from backend/prompts/templates/agent/system.j2 so that a turn
     # pays only for the capabilities it actually bound.
     #
     # Setting it is an escape hatch: the string is used verbatim (with {persona}
@@ -388,12 +389,22 @@ class AgentConfig(_Section):
     # to a wrong narrowing, so an incomplete list costs nothing it did not already cost.
     year_reference_markers: List[str] = Field(
         default_factory=lambda: [
-            "الصف", "صف", "ابتدائي", "اعدادي", "ثانوي", "روضه", "حضانه",
-            "grade", "year", "primary", "prep", "secondary", "kg", "class",
+            "الصف",
+            "صف",
+            "ابتدائي",
+            "اعدادي",
+            "ثانوي",
+            "روضه",
+            "حضانه",
+            "grade",
+            "year",
+            "primary",
+            "prep",
+            "secondary",
+            "kg",
+            "class",
         ]
     )
-
-
 
     context_window_messages: int = 6
 
@@ -404,11 +415,36 @@ class AgentConfig(_Section):
     # the check. Domain-specific and language-specific, hence profile data.
     social_phrases: List[str] = Field(
         default_factory=lambda: [
-            "hi", "hello", "hey", "good morning", "good evening",
-            "thanks", "thank you", "thanks a lot", "thank you very much",
-            "ok", "okay", "sure", "great", "cool", "nice", "bye", "goodbye",
-            "مرحبا", "اهلا", "أهلا", "السلام عليكم", "صباح الخير", "مساء الخير",
-            "شكرا", "شكرا لك", "شكرا جزيلا", "تمام", "حسنا", "طيب", "مع السلامة",
+            "hi",
+            "hello",
+            "hey",
+            "good morning",
+            "good evening",
+            "thanks",
+            "thank you",
+            "thanks a lot",
+            "thank you very much",
+            "ok",
+            "okay",
+            "sure",
+            "great",
+            "cool",
+            "nice",
+            "bye",
+            "goodbye",
+            "مرحبا",
+            "اهلا",
+            "أهلا",
+            "السلام عليكم",
+            "صباح الخير",
+            "مساء الخير",
+            "شكرا",
+            "شكرا لك",
+            "شكرا جزيلا",
+            "تمام",
+            "حسنا",
+            "طيب",
+            "مع السلامة",
         ]
     )
     # How a social turn is answered.
@@ -490,19 +526,73 @@ class AgentConfig(_Section):
     # as a plain substring.
     followup_markers: List[str] = Field(
         default_factory=lambda: [
-            "this", "these", "those", "that", "it", "they", "them", "their",
-            "there", "then", "same", "also", "too", "instead", "as well",
-            "what about", "how about", "and what", "and how", "and the",
-            "i mean", "i meant", "not that", "rather than",
+            "this",
+            "these",
+            "those",
+            "that",
+            "it",
+            "they",
+            "them",
+            "their",
+            "there",
+            "then",
+            "same",
+            "also",
+            "too",
+            "instead",
+            "as well",
+            "what about",
+            "how about",
+            "and what",
+            "and how",
+            "and the",
+            "i mean",
+            "i meant",
+            "not that",
+            "rather than",
             # Personal pronouns. A question about a person already introduced carries
             # that person only in the conversation: "what documents to transfer him"
             # names no child, no age and no year, and reads as a complete standalone
             # question to every test but this one.
-            "he", "him", "his", "she", "her", "hers", "me", "us", "one of", "both",
-            "هذا", "هذه", "ذلك", "تلك", "هؤلاء", "دي", "ده", "دول", "نفس",
-            "كمان", "ايضا", "أيضا", "برضه", "بردو", "اقصد", "أقصد", "يعني",
-            "بدل", "ماذا عن", "وماذا عن", "طيب",
-            "له", "لها", "عنه", "عنها", "ابني", "ابنتي", "طفلي", "ولدي",
+            "he",
+            "him",
+            "his",
+            "she",
+            "her",
+            "hers",
+            "me",
+            "us",
+            "one of",
+            "both",
+            "هذا",
+            "هذه",
+            "ذلك",
+            "تلك",
+            "هؤلاء",
+            "دي",
+            "ده",
+            "دول",
+            "نفس",
+            "كمان",
+            "ايضا",
+            "أيضا",
+            "برضه",
+            "بردو",
+            "اقصد",
+            "أقصد",
+            "يعني",
+            "بدل",
+            "ماذا عن",
+            "وماذا عن",
+            "طيب",
+            "له",
+            "لها",
+            "عنه",
+            "عنها",
+            "ابني",
+            "ابنتي",
+            "طفلي",
+            "ولدي",
         ]
     )
     # Openings that mark a message as a continuation of the previous one. Matched as a
@@ -510,9 +600,26 @@ class AgentConfig(_Section):
     # written joined to the following word, so it cannot be matched as a token.
     followup_openers: List[str] = Field(
         default_factory=lambda: [
-            "and ", "and, ", "but ", "so ", "ok and", "okay and", "also ",
-            "what about", "how about", "no i mean", "no, i mean", "no i meant",
-            "و", "وما", "وكم", "وهل", "طب ", "طيب ", "لا اقصد", "لا أقصد",
+            "and ",
+            "and, ",
+            "but ",
+            "so ",
+            "ok and",
+            "okay and",
+            "also ",
+            "what about",
+            "how about",
+            "no i mean",
+            "no, i mean",
+            "no i meant",
+            "و",
+            "وما",
+            "وكم",
+            "وهل",
+            "طب ",
+            "طيب ",
+            "لا اقصد",
+            "لا أقصد",
         ]
     )
 
@@ -525,7 +632,9 @@ class RagConfig(_Section):
     # which is the vocabulary the corpus uses, so it is inserted rather than translated.
     # Says the school's records are the source, because they are — see
     # `backend/agent/rag/graph_nodes.py:GradeDocuments.conditions`.
-    child_year_condition: str = "the student this question is about is in {year}, according to the school's records"
+    child_year_condition: str = (
+        "the student this question is about is in {year}, according to the school's records"
+    )
 
     evidence_grade_prompt: str = ""
     complexity_prompt: str = ""
@@ -688,7 +797,6 @@ class RagConfig(_Section):
     # Lexical overlap is kept as a cheap negative signal and a trace breadcrumb. It can
     # never conclude on its own, so disabling it changes reporting, not routing.
     evidence_lexical_enabled: bool = True
-
 
     # The grader is one synchronous call per retrieval — and one per sub-agent on a
     # decomposed question — so it is usually the dominant latency in a turn. Much of
@@ -940,17 +1048,17 @@ class CopyConfig(_Section):
     provider_busy: LocalizedText = Field(
         default_factory=lambda: LocalizedText(
             en="I'm getting more questions than I can answer right now. "
-               "Please try again in {seconds} seconds.",
+            "Please try again in {seconds} seconds.",
             ar="تصلني أسئلة أكثر مما أستطيع الإجابة عنه الآن. "
-               "يُرجى المحاولة مرة أخرى بعد {seconds} ثانية.",
+            "يُرجى المحاولة مرة أخرى بعد {seconds} ثانية.",
         )
     )
     too_many_turns: LocalizedText = Field(
         default_factory=lambda: LocalizedText(
             en="You're sending messages faster than I can answer them. "
-               "Please wait {seconds} seconds and try again.",
+            "Please wait {seconds} seconds and try again.",
             ar="أنت ترسل الرسائل أسرع مما أستطيع الرد عليها. "
-               "يُرجى الانتظار {seconds} ثانية ثم المحاولة مرة أخرى.",
+            "يُرجى الانتظار {seconds} ثانية ثم المحاولة مرة أخرى.",
         )
     )
     turn_in_progress: LocalizedText = Field(
@@ -990,7 +1098,9 @@ class CopyConfig(_Section):
         "I found relevant content, but the evidence isn't enough to determine an answer. "
         "Please provide more detail about what you're asking."
     )
-    hitl_clarify_missing_slots: str = "I found relevant content, but key information is still missing: "
+    hitl_clarify_missing_slots: str = (
+        "I found relevant content, but key information is still missing: "
+    )
     hitl_scope_default: str = (
         "I found several possibly relevant directions in the knowledge base. "
         "Which one are you asking about?"
@@ -1165,7 +1275,6 @@ class AssetDeliveryConfig(_Section):
     cache_max_age_seconds: int = 31_536_000
 
 
-
 class AssetsConfig(_Section):
     """Image/asset handling. Consumed from Phase 2 (storage) onward."""
 
@@ -1266,7 +1375,7 @@ class DomainProfile(BaseModel):
         # Imported here, not at module scope: backend.agent.tools pulls in the request context
         # and every tool module, and the profile package is imported by several of them.
         from backend.agent.chat.language import ARABIC, language_name
-        from backend.agent.prompts import render
+        from backend.prompts import render
 
         # The profile's own map first: a deployment that knows its languages may name
         # one the global map deliberately will not. See AgentConfig.language_names.
@@ -1279,8 +1388,7 @@ class DomainProfile(BaseModel):
 
         if self.agent.system_prompt:
             composed = (
-                self.agent.system_prompt
-                .replace("{persona}", self.identity.persona)
+                self.agent.system_prompt.replace("{persona}", self.identity.persona)
                 .replace("{language_directive}", language_directive)
                 .strip()
             )

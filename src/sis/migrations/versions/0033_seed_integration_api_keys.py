@@ -46,6 +46,7 @@ keys, changes nothing — and a ROTATED secret is inserted as a new row beside t
 rather than overwriting it, so a rollout where old and new containers overlap keeps
 working with both.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -87,12 +88,13 @@ _PREFIX_LENGTH = 12
 #: Seeded as `registrar` first, a shared key works everywhere, and a deployment that
 #: gives each caller its own secret still gets three narrow rows.
 _CREDENTIALS: tuple[tuple[tuple[str, ...], str, str], ...] = (
-    (("SIS_BOOTSTRAP_REGISTRAR_KEY", "LOCAL_SERVICE_KEY"),
-     "bootstrap registrar", "registrar"),
-    (("SIS_IDENTITY_API_KEY", "IDENTITY_SIS_API_KEY", "LOCAL_SERVICE_KEY"),
-     "identity service", "reader"),
-    (("SIS_RECORDS_API_KEY", "RECORDS_API_KEY", "LOCAL_SERVICE_KEY"),
-     "records facade", "reader"),
+    (("SIS_BOOTSTRAP_REGISTRAR_KEY", "LOCAL_SERVICE_KEY"), "bootstrap registrar", "registrar"),
+    (
+        ("SIS_IDENTITY_API_KEY", "IDENTITY_SIS_API_KEY", "LOCAL_SERVICE_KEY"),
+        "identity service",
+        "reader",
+    ),
+    (("SIS_RECORDS_API_KEY", "RECORDS_API_KEY", "LOCAL_SERVICE_KEY"), "records facade", "reader"),
 )
 
 
@@ -146,14 +148,16 @@ def upgrade() -> None:
 
         op.bulk_insert(
             keys,
-            [{
-                "prefix": prefix,
-                "key_hash": _hash(secret),
-                "label": label,
-                "scope": scope,
-                "is_active": True,
-                "created_at": now,
-            }],
+            [
+                {
+                    "prefix": prefix,
+                    "key_hash": _hash(secret),
+                    "label": label,
+                    "scope": scope,
+                    "is_active": True,
+                    "created_at": now,
+                }
+            ],
         )
         log.info("seeded the %s key (%s…) with scope %s", label, prefix, scope)
 

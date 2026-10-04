@@ -13,6 +13,7 @@ in the chat that waits on a model call, and it is the right one: nothing can be 
 until the words are known, and the parent is watching a recording they just made turn
 into text.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -20,12 +21,12 @@ import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 
+from backend.agent.chat.attachments import VoiceNoteRejected
+from backend.agent.schemas import AttachmentInfo
 from backend.api.deps import get_services
 from backend.application.ports.repositories import AttachmentRecord
-from backend.agent.chat.attachments import VoiceNoteRejected
 from backend.composition import Services
 from backend.infra.auth import AuthenticatedUser, get_current_user
-from backend.agent.schemas import AttachmentInfo
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,9 @@ async def upload_attachment(
     except LookupError:
         # Authentication creates the row this needs, so this is a caller the backend has
         # never served — refused as such rather than reported as a server fault.
-        raise HTTPException(status_code=403, detail="This account cannot send attachments.") from None
+        raise HTTPException(
+            status_code=403, detail="This account cannot send attachments."
+        ) from None
     return attachment_info(record)
 
 
@@ -118,7 +121,9 @@ async def get_attachment_bytes(
         data = await asyncio.to_thread(services.attachments.read_bytes, record)
     except FileNotFoundError:
         logger.error("Blob missing for attachment %s (%s)", attachment_id, record.storage_uri)
-        raise HTTPException(status_code=404, detail="The recording is no longer available") from None
+        raise HTTPException(
+            status_code=404, detail="The recording is no longer available"
+        ) from None
 
     return Response(
         content=data,

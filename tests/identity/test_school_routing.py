@@ -17,6 +17,7 @@ new shape — steer the nonce to a *different* school's number and the parent is
 against a database their children are not in. Two independent facts having to agree is
 what closes it, and `test_a_nonce_sent_to_another_schools_number_is_refused` is the proof.
 """
+
 from __future__ import annotations
 
 import json

@@ -1,5 +1,6 @@
 """B1: a retrieval backend outage must surface as retrieval_error (static, no LLM),
 never as no_knowledge — an unreachable Milvus says nothing about corpus coverage."""
+
 import sys
 import types
 import unittest
@@ -8,10 +9,10 @@ from unittest.mock import patch
 from backend.agent.chat.request_context import ChatRequestContext
 from tests.general.test_rag_short_circuit import (
     FakeStructuredModel,
-    enable_complexity_planning,
-    load_pipeline,
     _doc,
     _meta,
+    enable_complexity_planning,
+    load_pipeline,
 )
 
 
@@ -132,7 +133,8 @@ class RetrievalOutageTests(unittest.TestCase):
         self.assertEqual("answer", result.get("route"))
         self.assertEqual("partial", result.get("retrieval_status"))
         self.assertEqual(
-            ["weak evidence"], [d["text"] for d in result.get("docs")],
+            ["weak evidence"],
+            [d["text"] for d in result.get("docs")],
             "the evidence the first pass found survived the retry's outage",
         )
         self.assertTrue(
@@ -165,14 +167,16 @@ class RetrievalOutageTests(unittest.TestCase):
 
         ctx = self._ctx()
         try:
-            result = RetrieveRewritten(_Deps())({
-                "question": "question with flaky backend",
-                "request_context": ctx,
-                "rewrite_method": "step_back",
-                "rewritten_query": "broader question",
-                "docs": [],
-                "rag_trace": {},
-            })
+            result = RetrieveRewritten(_Deps())(
+                {
+                    "question": "question with flaky backend",
+                    "request_context": ctx,
+                    "rewrite_method": "step_back",
+                    "rewritten_query": "broader question",
+                    "docs": [],
+                    "rag_trace": {},
+                }
+            )
         finally:
             ctx.close()
 

@@ -28,6 +28,7 @@ creating a school supplies a code; nobody should be typing a connection string i
 console, and no two schools should be able to end up pointed at one database because
 somebody pasted the same URL twice.
 """
+
 from __future__ import annotations
 
 import re
@@ -102,9 +103,7 @@ def _database_name(database_url: str) -> str:
     return tail.split("?", 1)[0]
 
 
-def plan_provision(
-    code: str, *, template: str, existing_codes: tuple[str, ...]
-) -> ProvisionPlan:
+def plan_provision(code: str, *, template: str, existing_codes: tuple[str, ...]) -> ProvisionPlan:
     """Decide what provisioning this code would do. Pure: no server, no file, no clock.
 
     Raises rather than returning a plan whenever the estate would end up ambiguous --

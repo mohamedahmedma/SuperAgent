@@ -1,7 +1,7 @@
 """The search_knowledge_base tool.
 
 What this tool SAYS back to the model lives in
-backend/agent/prompts/templates/tools/knowledge_result.j2, not in this file. That text is
+backend/prompts/templates/tools/knowledge_result.j2, not in this file. That text is
 prompt — it instructs the model — and it is the Class B half of prompt routing: every
 branch of it depends on what retrieval actually returned, which the system prompt
 cannot know because it is built before the tool runs. Keeping it in a template means
@@ -9,11 +9,12 @@ each instruction is paid only on the turns where its condition is real.
 
 This module decides WHICH outcome occurred. The template renders it.
 """
+
 from langchain_core.tools import tool
+from pydantic import BaseModel
 
 from backend.agent.chat.request_context import ChatRequestContext
-from backend.agent.prompts import render as render_prompt
-from pydantic import BaseModel
+from backend.prompts import render as render_prompt
 
 #: The name the model calls, the planner forces, and the turn records. One spelling,
 #: so the three cannot drift apart.
@@ -147,9 +148,7 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         docs = rag_result.get("docs", []) if isinstance(rag_result, dict) else []
         rag_trace = rag_result.get("rag_trace", {}) if isinstance(rag_result, dict) else {}
         hitl_resume_state = (
-            rag_result.get("hitl_resume_state")
-            if isinstance(rag_result, dict)
-            else None
+            rag_result.get("hitl_resume_state") if isinstance(rag_result, dict) else None
         )
         ctx.store_rag_trace(rag_trace, hitl_resume_state)
 
@@ -203,9 +202,7 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
             # with them but cannot enforce them — a search for fees "up to Year 6"
             # still returns the whole fee table — so the narrowing has to be stated to
             # the model that writes the answer. Paid only on turns that carry one.
-            constraints=[
-                str(item) for item in (getattr(ctx, "carried_constraints", None) or [])
-            ],
+            constraints=[str(item) for item in (getattr(ctx, "carried_constraints", None) or [])],
             # The condition the parent never had to state, and the one this corpus is
             # most likely to vary by. Shares `discriminate` with the carried conditions
             # because it is the same question of the material: does it differ by this?

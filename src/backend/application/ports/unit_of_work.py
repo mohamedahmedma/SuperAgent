@@ -10,6 +10,7 @@ two repositories obtained independently can sit on two connections, and then "wr
 conversation, then its messages" is two transactions with a window between them.
 Reaching both through one unit of work makes sharing a transaction the easy thing.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

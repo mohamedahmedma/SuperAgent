@@ -21,8 +21,9 @@ Deleting nothing on the way down, for the same reason in reverse: a downgrade th
 there would put them straight back on the next sign-in. What downgrade *does* remove is the
 grants this revision added to roles, which is the change it actually made.
 """
-from alembic import op
+
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0013"
 down_revision = "0012"
@@ -74,7 +75,5 @@ def downgrade() -> None:
         )
     )
     op.execute(
-        sa.text(
-            "DELETE FROM permissions WHERE code IN ('timetable.read', 'timetable.write')"
-        )
+        sa.text("DELETE FROM permissions WHERE code IN ('timetable.read', 'timetable.write')")
     )

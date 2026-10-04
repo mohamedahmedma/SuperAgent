@@ -12,6 +12,7 @@ endpoint, or an API can serve it, without any caller knowing the difference).
 The remote path's tests are mostly about NOT corrupting the corpus. A wrong vector is
 worse than no vector: it is stored, it is searched, and nothing downstream can tell.
 """
+
 import unittest
 from unittest.mock import patch
 
@@ -19,8 +20,8 @@ import backend.indexing.embedding as embedding_module
 from backend.indexing.embedding import (
     CoalescingEmbedder,
     EmbeddingService,
-    _RemoteEmbedder,
     _create_dense_embedder,
+    _RemoteEmbedder,
 )
 
 
@@ -45,7 +46,9 @@ class LazyConstructionTests(unittest.TestCase):
 
     def test_the_embedder_is_built_once_and_reused(self):
         sentinel = Sentinel()
-        with patch.object(embedding_module, "_create_dense_embedder", return_value=sentinel) as create:
+        with patch.object(
+            embedding_module, "_create_dense_embedder", return_value=sentinel
+        ) as create:
             service = EmbeddingService()
             service.get_embeddings(["a"])
             service.get_embeddings(["b"])
@@ -54,7 +57,9 @@ class LazyConstructionTests(unittest.TestCase):
 
     def test_warm_up_builds_it_before_any_request(self):
         sentinel = Sentinel()
-        with patch.object(embedding_module, "_create_dense_embedder", return_value=sentinel) as create:
+        with patch.object(
+            embedding_module, "_create_dense_embedder", return_value=sentinel
+        ) as create:
             service = EmbeddingService()
             service.warm_up()
             create.assert_called_once()
@@ -62,8 +67,10 @@ class LazyConstructionTests(unittest.TestCase):
     def test_warm_up_does_not_take_the_process_down(self):
         """Boot-time warming is an optimisation. A provider that is briefly unreachable
         must not stop the app from starting."""
-        with patch.object(embedding_module, "_create_dense_embedder", side_effect=RuntimeError("no")):
-            EmbeddingService().warm_up()   # must not raise
+        with patch.object(
+            embedding_module, "_create_dense_embedder", side_effect=RuntimeError("no")
+        ):
+            EmbeddingService().warm_up()  # must not raise
 
     def test_an_empty_list_never_reaches_the_embedder(self):
         with patch.object(embedding_module, "_create_dense_embedder") as create:
@@ -137,12 +144,16 @@ class RemoteEmbedderTests(unittest.TestCase):
             {"index": 1, "embedding": [0.0, 1.0, 0.0]},
         ]
         with patch("requests.Session.post", return_value=FakeResponse(shuffled)):
-            self.assertEqual([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-                             remote.embed_documents(["a", "b", "c"]))
+            self.assertEqual(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                remote.embed_documents(["a", "b", "c"]),
+            )
 
     def test_a_short_response_raises_rather_than_misaligning(self):
         remote = self.remote()
-        with patch("requests.Session.post", return_value=FakeResponse([{"index": 0, "embedding": [1.0]}])):
+        with patch(
+            "requests.Session.post", return_value=FakeResponse([{"index": 0, "embedding": [1.0]}])
+        ):
             with self.assertRaises(ValueError):
                 remote.embed_documents(["a", "b"])
 
@@ -152,7 +163,9 @@ class RemoteEmbedderTests(unittest.TestCase):
 
         def fake_post(url, json=None, headers=None, timeout=None):
             posts.append(json["input"])
-            return FakeResponse([{"index": i, "embedding": [float(i)]} for i in range(len(json["input"]))])
+            return FakeResponse(
+                [{"index": i, "embedding": [float(i)]} for i in range(len(json["input"]))]
+            )
 
         with patch("requests.Session.post", side_effect=fake_post):
             vectors = remote.embed_documents(["a", "b", "c", "d", "e"])
@@ -198,8 +211,11 @@ class RemoteForServingTests(unittest.TestCase):
     """RAG_FIX_PLAN item 39: what a hosted embedder needs that the local model does not."""
 
     def remote(self, **env):
-        settings = {"EMBEDDING_BACKEND": "openai", "EMBEDDING_BASE_URL": "http://e/v1",
-                    "EMBEDDING_MODEL": "BAAI/bge-m3"}
+        settings = {
+            "EMBEDDING_BACKEND": "openai",
+            "EMBEDDING_BASE_URL": "http://e/v1",
+            "EMBEDDING_MODEL": "BAAI/bge-m3",
+        }
         settings.update(env)
         with patch.dict("os.environ", settings, clear=False):
             return _RemoteEmbedder()
@@ -207,13 +223,17 @@ class RemoteForServingTests(unittest.TestCase):
     def test_a_provider_vector_comes_back_unit_length(self):
         """The dense lane searches by inner product, which is cosine only for unit
         vectors, and the stored ones are unit length."""
-        with patch("requests.Session.post",
-                   return_value=FakeResponse([{"index": 0, "embedding": [3.0, 4.0]}])):
+        with patch(
+            "requests.Session.post",
+            return_value=FakeResponse([{"index": 0, "embedding": [3.0, 4.0]}]),
+        ):
             self.assertEqual([[0.6, 0.8]], self.remote().embed_documents(["a"]))
 
     def test_an_already_unit_vector_is_left_as_it_is(self):
-        with patch("requests.Session.post",
-                   return_value=FakeResponse([{"index": 0, "embedding": [0.6, 0.8]}])):
+        with patch(
+            "requests.Session.post",
+            return_value=FakeResponse([{"index": 0, "embedding": [0.6, 0.8]}]),
+        ):
             self.assertEqual([[0.6, 0.8]], self.remote().embed_documents(["a"]))
 
     def test_a_remote_embedder_is_not_coalesced_by_default(self):
@@ -249,8 +269,9 @@ class RemoteForServingTests(unittest.TestCase):
 
     def test_prewarm_never_opens_more_than_the_pool_holds(self):
         remote = self.remote(EMBEDDING_POOL_SIZE="12")
-        with patch("requests.Session.post",
-                   return_value=FakeResponse([{"index": 0, "embedding": [1.0]}])) as post:
+        with patch(
+            "requests.Session.post", return_value=FakeResponse([{"index": 0, "embedding": [1.0]}])
+        ) as post:
             self.assertEqual(12, remote.prewarm(500))
         self.assertEqual(12, post.call_count)
 
@@ -262,8 +283,11 @@ class RemoteForServingTests(unittest.TestCase):
         remote = self.remote()
         with patch.object(remote, "prewarm", return_value=32) as prewarm:
             with patch.object(embedding_module, "_create_dense_embedder", return_value=remote):
-                with patch.dict("os.environ", {"EMBEDDING_PREWARM_CONNECTIONS": "",
-                                               "EMBEDDING_COALESCE_MAX_BATCH": ""}, clear=False):
+                with patch.dict(
+                    "os.environ",
+                    {"EMBEDDING_PREWARM_CONNECTIONS": "", "EMBEDDING_COALESCE_MAX_BATCH": ""},
+                    clear=False,
+                ):
                     EmbeddingService().warm_up()
         prewarm.assert_called_once_with(remote.pool_size)
 
@@ -319,8 +343,13 @@ class _FlakyServer:
                     self._held.append(conn)  # never answered
                 continue
             body = _json.dumps({"data": [{"index": 0, "embedding": [0.6, 0.8]}]}).encode()
-            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                         b"Content-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
+            conn.sendall(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                b"Content-Length: "
+                + str(len(body)).encode()
+                + b"\r\nConnection: close\r\n\r\n"
+                + body
+            )
             conn.close()
             del request
 
@@ -337,8 +366,14 @@ class _FlakyServer:
                 return data
             data += chunk
         head, _, body = data.partition(blank_line)
-        length = next((int(line.split(b":", 1)[1]) for line in head.split(crlf)
-                       if line.lower().startswith(b"content-length:")), 0)
+        length = next(
+            (
+                int(line.split(b":", 1)[1])
+                for line in head.split(crlf)
+                if line.lower().startswith(b"content-length:")
+            ),
+            0,
+        )
         while len(body) < length:
             chunk = conn.recv(65536)
             if not chunk:
@@ -356,7 +391,11 @@ class ConnectionFailureTests(unittest.TestCase):
     """RAG_FIX_PLAN item 39: one failed connection must not end a turn."""
 
     def remote(self, url, **env):
-        settings = {"EMBEDDING_BACKEND": "openai", "EMBEDDING_BASE_URL": url, "EMBEDDING_MODEL": "m"}
+        settings = {
+            "EMBEDDING_BACKEND": "openai",
+            "EMBEDDING_BASE_URL": url,
+            "EMBEDDING_MODEL": "m",
+        }
         settings.update(env)
         with patch.dict("os.environ", settings, clear=False):
             return _RemoteEmbedder()
@@ -377,7 +416,9 @@ class ConnectionFailureTests(unittest.TestCase):
             remote = self.remote(server.url, EMBEDDING_QUERY_TIMEOUT_SECONDS="0.5")
             started = _time.perf_counter()
             self.assertEqual([[0.6, 0.8]], remote.embed_documents(["q"]))
-            self.assertLess(_time.perf_counter() - started, 5.0, "waited out more than the query timeout")
+            self.assertLess(
+                _time.perf_counter() - started, 5.0, "waited out more than the query timeout"
+            )
         finally:
             server.close()
 
@@ -398,10 +439,16 @@ class ConnectionFailureTests(unittest.TestCase):
 
         def fake_post(url, json=None, headers=None, timeout=None):
             captured["timeout"] = timeout
-            return FakeResponse([{"index": i, "embedding": [1.0]} for i in range(len(json["input"]))])
+            return FakeResponse(
+                [{"index": i, "embedding": [1.0]} for i in range(len(json["input"]))]
+            )
 
-        remote = self.remote("http://e/v1", EMBEDDING_TIMEOUT_SECONDS="30",
-                             EMBEDDING_QUERY_TIMEOUT_SECONDS="10", EMBEDDING_CONNECT_TIMEOUT_SECONDS="5")
+        remote = self.remote(
+            "http://e/v1",
+            EMBEDDING_TIMEOUT_SECONDS="30",
+            EMBEDDING_QUERY_TIMEOUT_SECONDS="10",
+            EMBEDDING_CONNECT_TIMEOUT_SECONDS="5",
+        )
         with patch("requests.Session.post", side_effect=fake_post):
             remote.embed_documents(["one question"])
             self.assertEqual((5.0, 10.0), captured["timeout"])

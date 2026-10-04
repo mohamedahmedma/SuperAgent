@@ -1,4 +1,5 @@
 """Stage 10: global administrator authority and the reversible maintenance gate."""
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -38,15 +39,14 @@ def _account(client: TestClient, role: RoleCode, username: str) -> dict[str, str
             )
         )
         uow.commit()
-    response = client.post(
-        "/v1/auth/login", json={"username": username, "password": PASSWORD}
-    )
+    response = client.post("/v1/auth/login", json={"username": username, "password": PASSWORD})
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['token']}"}
 
 
 def test_paused_system_blocks_normal_users_but_not_system_administrator(
-    client: TestClient, school: None,
+    client: TestClient,
+    school: None,
 ) -> None:
     admin = _account(client, RoleCode.SYSTEM_ADMIN, "sysadmin.stage10")
     principal = _account(client, RoleCode.PRINCIPAL, "principal.stage10")
@@ -76,11 +76,14 @@ def test_paused_system_blocks_normal_users_but_not_system_administrator(
 def test_maintenance_is_read_only_for_normal_users(client: TestClient, school: None) -> None:
     admin = _account(client, RoleCode.SYSTEM_ADMIN, "sysadmin.maintenance")
     principal = _account(client, RoleCode.PRINCIPAL, "principal.maintenance")
-    assert client.put(
-        "/v1/admin/system/status",
-        headers=admin,
-        json={"status": "maintenance", "note": "Applying updates"},
-    ).status_code == 200
+    assert (
+        client.put(
+            "/v1/admin/system/status",
+            headers=admin,
+            json={"status": "maintenance", "note": "Applying updates"},
+        ).status_code
+        == 200
+    )
 
     assert client.get("/v1/rbac/roles", headers=principal).status_code == 200
     blocked = client.post(
@@ -89,11 +92,14 @@ def test_maintenance_is_read_only_for_normal_users(client: TestClient, school: N
         json={"username": "blocked", "password": "long-enough-password"},
     )
     assert blocked.status_code == 503
-    assert client.put(
-        "/v1/admin/system/status",
-        headers=admin,
-        json={"status": "active"},
-    ).status_code == 200
+    assert (
+        client.put(
+            "/v1/admin/system/status",
+            headers=admin,
+            json={"status": "active"},
+        ).status_code
+        == 200
+    )
 
 
 def test_system_administrator_can_manage_accounts(client: TestClient, school: None) -> None:
@@ -110,9 +116,7 @@ def test_system_administrator_can_manage_accounts(client: TestClient, school: No
     )
     assert created.status_code == 201, created.text
     user_id = created.json()["id"]
-    updated = client.patch(
-        f"/v1/rbac/users/{user_id}", headers=admin, json={"is_active": False}
-    )
+    updated = client.patch(f"/v1/rbac/users/{user_id}", headers=admin, json={"is_active": False})
     assert updated.status_code == 200
     assert updated.json()["is_active"] is False
 

@@ -3,6 +3,7 @@
 Scalar comparisons only. Which criterion an attribute's declared type calls for is the
 index's decision (`backend/assets/entity_store.py`); this runs the query it asks for.
 """
+
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
@@ -64,7 +65,9 @@ class SqlAlchemyEntityAttributeRepository:
         boolean: bool | None = None,
         keys: Collection[str] | None = None,
     ) -> set[str]:
-        statement = self._scoped(select(EntityAttribute.asset_id).distinct(), name, profile, restrict_to)
+        statement = self._scoped(
+            select(EntityAttribute.asset_id).distinct(), name, profile, restrict_to
+        )
         if minimum is not None:
             statement = statement.where(EntityAttribute.value_number >= minimum)
         if maximum is not None:
@@ -96,7 +99,9 @@ class SqlAlchemyEntityAttributeRepository:
         total = self._session.scalar(select(func.count(EntityAttribute.id)))
         assets = self._session.scalar(select(func.count(distinct(EntityAttribute.asset_id))))
         by_name = self._session.execute(
-            select(EntityAttribute.name, func.count(EntityAttribute.id)).group_by(EntityAttribute.name)
+            select(EntityAttribute.name, func.count(EntityAttribute.id)).group_by(
+                EntityAttribute.name
+            )
         ).all()
         return {
             "rows": int(total or 0),

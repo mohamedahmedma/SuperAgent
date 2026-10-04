@@ -1,4 +1,5 @@
 """Staff chat is durable, school-isolated, and derives every group membership live."""
+
 from datetime import date
 
 from sqlalchemy import delete, select
@@ -7,7 +8,6 @@ from sis.application.services.access import ensure_catalogue
 from sis.infrastructure.crypto import hash_password
 from sis.infrastructure.db import models as m
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
-
 
 PASSWORD = "StrongPass123!"
 SCHOOL = "CHAT"
@@ -22,38 +22,62 @@ def _seed() -> dict[str, int]:
         session.add_all([school, other_school])
         session.flush()
         year = m.AcademicYear(
-            code="CHAT-2026", school_id=school.id, name_en="2026", name_ar="٢٠٢٦",
-            starts_on=date(2026, 9, 1), ends_on=date(2027, 6, 30), is_current=True,
+            code="CHAT-2026",
+            school_id=school.id,
+            name_en="2026",
+            name_ar="٢٠٢٦",
+            starts_on=date(2026, 9, 1),
+            ends_on=date(2027, 6, 30),
+            is_current=True,
         )
         session.add(year)
         session.flush()
-        grade3 = m.YearLevel(code="G3", school_id=school.id, name_en="Grade 3", name_ar="الصف الثالث")
-        grade4 = m.YearLevel(code="G4", school_id=school.id, name_en="Grade 4", name_ar="الصف الرابع")
+        grade3 = m.YearLevel(
+            code="G3", school_id=school.id, name_en="Grade 3", name_ar="الصف الثالث"
+        )
+        grade4 = m.YearLevel(
+            code="G4", school_id=school.id, name_en="Grade 4", name_ar="الصف الرابع"
+        )
         session.add_all([grade3, grade4])
         session.flush()
-        math = m.Subject(code="MATH", academic_year_id=year.id, name_en="Mathematics", name_ar="الرياضيات")
-        science = m.Subject(code="SCI", academic_year_id=year.id, name_en="Science", name_ar="العلوم")
+        math = m.Subject(
+            code="MATH", academic_year_id=year.id, name_en="Mathematics", name_ar="الرياضيات"
+        )
+        science = m.Subject(
+            code="SCI", academic_year_id=year.id, name_en="Science", name_ar="العلوم"
+        )
         session.add_all([math, science])
         session.flush()
-        session.add_all([
-            m.SubjectYearLevel(subject_id=math.id, year_level_id=grade3.id),
-            m.SubjectYearLevel(subject_id=science.id, year_level_id=grade4.id),
-        ])
+        session.add_all(
+            [
+                m.SubjectYearLevel(subject_id=math.id, year_level_id=grade3.id),
+                m.SubjectYearLevel(subject_id=science.id, year_level_id=grade4.id),
+            ]
+        )
         class3 = m.ClassSection(
-            academic_year_id=year.id, year_level_id=grade3.id, code="3A",
-            name_en="3A", name_ar="٣ أ",
+            academic_year_id=year.id,
+            year_level_id=grade3.id,
+            code="3A",
+            name_en="3A",
+            name_ar="٣ أ",
         )
         class4 = m.ClassSection(
-            academic_year_id=year.id, year_level_id=grade4.id, code="4A",
-            name_en="4A", name_ar="٤ أ",
+            academic_year_id=year.id,
+            year_level_id=grade4.id,
+            code="4A",
+            name_en="4A",
+            name_ar="٤ أ",
         )
         session.add_all([class3, class4])
         session.flush()
 
         def user(username: str, name: str, school_id: int | None) -> m.User:
             row = m.User(
-                username=username, password_hash=hash_password(PASSWORD),
-                full_name_en=name, full_name_ar=name, school_id=school_id,
+                username=username,
+                password_hash=hash_password(PASSWORD),
+                full_name_en=name,
+                full_name_ar=name,
+                school_id=school_id,
             )
             session.add(row)
             session.flush()
@@ -72,15 +96,20 @@ def _seed() -> dict[str, int]:
         teacher_role = session.scalar(select(m.Role).where(m.Role.code == "teacher"))
         supervisor_role = session.scalar(select(m.Role).where(m.Role.code == "floor_supervisor"))
         manager_role = session.scalar(select(m.Role).where(m.Role.code == "school_manager"))
-        attendance_role = session.scalar(select(m.Role).where(m.Role.code == "attendance_supervisor"))
+        attendance_role = session.scalar(
+            select(m.Role).where(m.Role.code == "attendance_supervisor")
+        )
         admin_role = session.scalar(select(m.Role).where(m.Role.code == "admin"))
         assert all((teacher_role, supervisor_role, manager_role, attendance_role, admin_role))
 
         teachers = []
         for index, account in enumerate((alice, bob, carol), start=1):
             teacher = m.Teacher(
-                staff_number=f"T-{index}", school_id=school.id, user_id=account.id,
-                full_name_en=account.full_name_en, full_name_ar=account.full_name_ar,
+                staff_number=f"T-{index}",
+                school_id=school.id,
+                user_id=account.id,
+                full_name_en=account.full_name_en,
+                full_name_ar=account.full_name_ar,
             )
             session.add(teacher)
             session.flush()
@@ -92,41 +121,82 @@ def _seed() -> dict[str, int]:
             (bob, bob_teacher, grade3, math, class3),
             (carol, carol_teacher, grade4, science, class4),
         ):
-            session.add(m.UserRole(
-                user_id=account.id, role_id=teacher_role.id,
-                scope_type="class_section", scope_id=classroom.id, granted_by="test",
-            ))
-            session.add(m.TeacherSubject(
-                teacher_id=teacher.id, subject_id=subject.id, academic_year_id=year.id,
-            ))
-            session.add(m.TeacherYearLevel(
-                teacher_id=teacher.id, year_level_id=level.id, subject_id=subject.id,
-            ))
-            session.add(m.TeacherClassSection(
-                teacher_id=teacher.id, class_section_id=classroom.id,
-                subject_id=subject.id, assigned_by="test",
-            ))
-        session.add(m.UserRole(
-            user_id=supervisor.id, role_id=supervisor_role.id,
-            scope_type="year_level", scope_id=grade3.id, granted_by="test",
-        ))
-        session.add(m.UserRole(
-            user_id=manager.id, role_id=manager_role.id,
-            scope_type="school", scope_id=school.id, granted_by="test",
-        ))
-        session.add(m.UserRole(
-            user_id=attendance_supervisor.id, role_id=attendance_role.id,
-            scope_type="class_section", scope_id=class3.id, granted_by="test",
-        ))
-        session.add(m.UserRole(
-            user_id=admin.id, role_id=admin_role.id,
-            scope_type="global", scope_id=None, granted_by="test",
-        ))
+            session.add(
+                m.UserRole(
+                    user_id=account.id,
+                    role_id=teacher_role.id,
+                    scope_type="class_section",
+                    scope_id=classroom.id,
+                    granted_by="test",
+                )
+            )
+            session.add(
+                m.TeacherSubject(
+                    teacher_id=teacher.id,
+                    subject_id=subject.id,
+                    academic_year_id=year.id,
+                )
+            )
+            session.add(
+                m.TeacherYearLevel(
+                    teacher_id=teacher.id,
+                    year_level_id=level.id,
+                    subject_id=subject.id,
+                )
+            )
+            session.add(
+                m.TeacherClassSection(
+                    teacher_id=teacher.id,
+                    class_section_id=classroom.id,
+                    subject_id=subject.id,
+                    assigned_by="test",
+                )
+            )
+        session.add(
+            m.UserRole(
+                user_id=supervisor.id,
+                role_id=supervisor_role.id,
+                scope_type="year_level",
+                scope_id=grade3.id,
+                granted_by="test",
+            )
+        )
+        session.add(
+            m.UserRole(
+                user_id=manager.id,
+                role_id=manager_role.id,
+                scope_type="school",
+                scope_id=school.id,
+                granted_by="test",
+            )
+        )
+        session.add(
+            m.UserRole(
+                user_id=attendance_supervisor.id,
+                role_id=attendance_role.id,
+                scope_type="class_section",
+                scope_id=class3.id,
+                granted_by="test",
+            )
+        )
+        session.add(
+            m.UserRole(
+                user_id=admin.id,
+                role_id=admin_role.id,
+                scope_type="global",
+                scope_id=None,
+                granted_by="test",
+            )
+        )
         uow.commit()
         return {
-            "alice": alice.id, "bob": bob.id, "carol": carol.id,
-            "supervisor": supervisor.id, "manager": manager.id,
-            "attendance_supervisor": attendance_supervisor.id, "admin": admin.id,
+            "alice": alice.id,
+            "bob": bob.id,
+            "carol": carol.id,
+            "supervisor": supervisor.id,
+            "manager": manager.id,
+            "attendance_supervisor": attendance_supervisor.id,
+            "admin": admin.id,
             "outsider": outsider.id,
             "alice_teacher": alice_teacher.id,
         }
@@ -152,12 +222,19 @@ def test_groups_follow_current_teaching_and_supervisor_assignments(client):
     attendance_supervisor = _headers(client, "attendance.chat")
 
     assert {item["category"] for item in _conversations(client, alice)} == {
-        "school", "floor", "subject", "class"
+        "school",
+        "floor",
+        "subject",
+        "class",
     }
     # A floor supervisor inherits every subject and class conversation under their
     # managed floor, plus the floor-supervisor leadership room.
     assert {item["category"] for item in _conversations(client, supervisor)} == {
-        "school", "leadership", "floor", "subject", "class"
+        "school",
+        "leadership",
+        "floor",
+        "subject",
+        "class",
     }
     scoped = [item for item in _conversations(client, supervisor) if item["scope_code"]]
     assert {item["scope_code"] for item in scoped} == {"G3"}
@@ -166,10 +243,15 @@ def test_groups_follow_current_teaching_and_supervisor_assignments(client):
     # filter metadata keeps that larger list usable in the console.
     manager_conversations = _conversations(client, manager)
     assert {item["category"] for item in manager_conversations} == {
-        "school", "leadership", "floor", "subject", "class"
+        "school",
+        "leadership",
+        "floor",
+        "subject",
+        "class",
     }
     assert {item["scope_code"] for item in manager_conversations if item["scope_code"]} == {
-        "G3", "G4"
+        "G3",
+        "G4",
     }
 
     # Attendance supervisors are explicitly outside the manager + floor-supervisors
@@ -187,7 +269,8 @@ def test_group_message_is_shared_only_with_current_members(client):
 
     sent = client.post(
         f"/v1/schools/{SCHOOL}/chat/conversations/{subject['id']}/messages",
-        headers=alice, json={"body": "Planning for next week"},
+        headers=alice,
+        json={"body": "Planning for next week"},
     )
     assert sent.status_code == 201, sent.text
     read = client.get(
@@ -195,22 +278,34 @@ def test_group_message_is_shared_only_with_current_members(client):
     )
     assert read.status_code == 200
     assert read.json()[0]["body"] == "Planning for next week"
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/chat/conversations/{subject['id']}/messages", headers=carol
-    ).status_code == 403
+    assert (
+        client.get(
+            f"/v1/schools/{SCHOOL}/chat/conversations/{subject['id']}/messages", headers=carol
+        ).status_code
+        == 403
+    )
 
     # Removing the live assignments removes Alice from those automatic groups without
     # deleting history or running a membership synchroniser.
     with SqlAlchemyUnitOfWork() as uow:
         teacher_id = ids["alice_teacher"]
-        uow._session.execute(delete(m.TeacherClassSection).where(m.TeacherClassSection.teacher_id == teacher_id))
-        uow._session.execute(delete(m.TeacherYearLevel).where(m.TeacherYearLevel.teacher_id == teacher_id))
-        uow._session.execute(delete(m.TeacherSubject).where(m.TeacherSubject.teacher_id == teacher_id))
+        uow._session.execute(
+            delete(m.TeacherClassSection).where(m.TeacherClassSection.teacher_id == teacher_id)
+        )
+        uow._session.execute(
+            delete(m.TeacherYearLevel).where(m.TeacherYearLevel.teacher_id == teacher_id)
+        )
+        uow._session.execute(
+            delete(m.TeacherSubject).where(m.TeacherSubject.teacher_id == teacher_id)
+        )
         uow.commit()
     assert {item["category"] for item in _conversations(client, alice)} == {"school"}
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/chat/conversations/{subject['id']}/messages", headers=alice
-    ).status_code == 403
+    assert (
+        client.get(
+            f"/v1/schools/{SCHOOL}/chat/conversations/{subject['id']}/messages", headers=alice
+        ).status_code
+        == 403
+    )
 
 
 def test_private_chat_search_and_messages_are_school_isolated(client):
@@ -219,9 +314,7 @@ def test_private_chat_search_and_messages_are_school_isolated(client):
     bob = _headers(client, "bob.chat")
     carol = _headers(client, "carol.chat")
 
-    found = client.get(
-        f"/v1/schools/{SCHOOL}/chat/people", params={"q": "Bob"}, headers=alice
-    )
+    found = client.get(f"/v1/schools/{SCHOOL}/chat/people", params={"q": "Bob"}, headers=alice)
     assert found.status_code == 200
     assert [person["user_id"] for person in found.json()] == [ids["bob"]]
     forgiving = client.get(
@@ -238,16 +331,26 @@ def test_private_chat_search_and_messages_are_school_isolated(client):
     )
     assert opened.status_code == 201, opened.text
     conversation_id = opened.json()["id"]
-    assert client.post(
-        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages",
-        headers=bob, json={"body": "Private reply"},
-    ).status_code == 201
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages", headers=alice
-    ).json()[0]["body"] == "Private reply"
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages", headers=carol
-    ).status_code == 403
+    assert (
+        client.post(
+            f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages",
+            headers=bob,
+            json={"body": "Private reply"},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.get(
+            f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages", headers=alice
+        ).json()[0]["body"]
+        == "Private reply"
+    )
+    assert (
+        client.get(
+            f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages", headers=carol
+        ).status_code
+        == 403
+    )
 
 
 def test_admin_is_invisible_to_staff_but_can_see_everyone(client):
@@ -286,14 +389,10 @@ def test_admin_is_invisible_to_staff_but_can_see_everyone(client):
         headers=bob,
         json={"body": "Private staff discussion"},
     ).json()
-    ordinary_delivery = client.post(
-        f"/v1/schools/{SCHOOL}/chat/presence", headers=alice, json={}
-    )
+    ordinary_delivery = client.post(f"/v1/schools/{SCHOOL}/chat/presence", headers=alice, json={})
     assert ordinary_delivery.status_code == 200
     assert ordinary_delivery.json()["delivered_messages"] == 1
-    observed = next(
-        row for row in _conversations(client, admin) if row["id"] == private_chat["id"]
-    )
+    observed = next(row for row in _conversations(client, admin) if row["id"] == private_chat["id"])
     assert observed["observer_view"] is True
     assert "Alice" in observed["title_en"] and "Bob" in observed["title_en"]
     observed_messages = client.get(
@@ -302,10 +401,13 @@ def test_admin_is_invisible_to_staff_but_can_see_everyone(client):
     )
     assert observed_messages.status_code == 200
     assert observed_messages.json()[0]["body"] == "Private staff discussion"
-    assert client.post(
-        f"/v1/schools/{SCHOOL}/chat/conversations/{private_chat['id']}/read",
-        headers=admin,
-    ).status_code == 204
+    assert (
+        client.post(
+            f"/v1/schools/{SCHOOL}/chat/conversations/{private_chat['id']}/read",
+            headers=admin,
+        ).status_code
+        == 204
+    )
     sender_receipts = client.get(
         f"/v1/schools/{SCHOOL}/chat/messages/{private_message['id']}/receipts",
         headers=bob,
@@ -323,10 +425,13 @@ def test_admin_is_invisible_to_staff_but_can_see_everyone(client):
     assert opened.json()["observer_view"] is False
     assert any(row["id"] == conversation_id for row in _conversations(client, admin))
     assert all(row["id"] != conversation_id for row in _conversations(client, alice))
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages",
-        headers=alice,
-    ).status_code == 404
+    assert (
+        client.get(
+            f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages",
+            headers=alice,
+        ).status_code
+        == 404
+    )
 
     school_group = next(row for row in _conversations(client, admin) if row["category"] == "school")
     sent = client.post(
@@ -336,9 +441,7 @@ def test_admin_is_invisible_to_staff_but_can_see_everyone(client):
     )
     assert sent.status_code == 201, sent.text
     assert sent.json()["receipts"] == {"total": 0, "delivered": 0, "read": 0}
-    heartbeat = client.post(
-        f"/v1/schools/{SCHOOL}/chat/presence", headers=alice, json={}
-    )
+    heartbeat = client.post(f"/v1/schools/{SCHOOL}/chat/presence", headers=alice, json={})
     assert heartbeat.status_code == 200
     assert heartbeat.json()["delivered_messages"] == 0
     staff_messages = client.get(
@@ -347,7 +450,9 @@ def test_admin_is_invisible_to_staff_but_can_see_everyone(client):
     )
     assert staff_messages.status_code == 200
     assert staff_messages.json() == []
-    staff_group = next(row for row in _conversations(client, alice) if row["id"] == school_group["id"])
+    staff_group = next(
+        row for row in _conversations(client, alice) if row["id"] == school_group["id"]
+    )
     assert staff_group["last_message"] is None
     assert staff_group["unread_count"] == 0
 
@@ -361,13 +466,17 @@ def test_read_marker_clears_unread_count(client):
     ).json()
     client.post(
         f"/v1/schools/{SCHOOL}/chat/conversations/{opened['id']}/messages",
-        headers=bob, json={"body": "Unread"},
+        headers=bob,
+        json={"body": "Unread"},
     )
     direct = next(item for item in _conversations(client, alice) if item["id"] == opened["id"])
     assert direct["unread_count"] == 1
-    assert client.post(
-        f"/v1/schools/{SCHOOL}/chat/conversations/{opened['id']}/read", headers=alice
-    ).status_code == 204
+    assert (
+        client.post(
+            f"/v1/schools/{SCHOOL}/chat/conversations/{opened['id']}/read", headers=alice
+        ).status_code
+        == 204
+    )
     direct = next(item for item in _conversations(client, alice) if item["id"] == opened["id"])
     assert direct["unread_count"] == 0
 
@@ -387,8 +496,14 @@ def test_conversation_mute_is_private_persistent_and_keeps_unread_count(client):
     assert muted.status_code == 200, muted.text
     assert muted.json()["is_muted"] is True
     assert muted.json()["muted_until"] is not None
-    assert next(row for row in _conversations(client, alice) if row["id"] == opened["id"])["is_muted"] is True
-    assert next(row for row in _conversations(client, bob) if row["id"] == opened["id"])["is_muted"] is False
+    assert (
+        next(row for row in _conversations(client, alice) if row["id"] == opened["id"])["is_muted"]
+        is True
+    )
+    assert (
+        next(row for row in _conversations(client, bob) if row["id"] == opened["id"])["is_muted"]
+        is False
+    )
 
     client.post(
         f"/v1/schools/{SCHOOL}/chat/conversations/{opened['id']}/messages",
@@ -417,21 +532,23 @@ def test_delivery_and_read_receipts_follow_recipient_activity(client):
     ).json()["id"]
     sent = client.post(
         f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages",
-        headers=alice, json={"body": "Receipt test"},
+        headers=alice,
+        json={"body": "Receipt test"},
     ).json()
     assert sent["receipts"] == {"total": 1, "delivered": 0, "read": 0}
 
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages", headers=bob
-    ).status_code == 200
+    assert (
+        client.get(
+            f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages", headers=bob
+        ).status_code
+        == 200
+    )
     after_delivery = client.get(
         f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages", headers=alice
     ).json()[-1]
     assert after_delivery["receipts"] == {"total": 1, "delivered": 1, "read": 0}
 
-    client.post(
-        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/read", headers=bob
-    )
+    client.post(f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/read", headers=bob)
     after_read = client.get(
         f"/v1/schools/{SCHOOL}/chat/messages/{sent['id']}/receipts", headers=alice
     ).json()
@@ -456,9 +573,7 @@ def test_presence_marks_cross_page_delivery_and_exposes_typing_and_staff_details
     ).json()
     assert sent["receipts"] == {"total": 1, "delivered": 0, "read": 0}
 
-    heartbeat = client.post(
-        f"/v1/schools/{SCHOOL}/chat/presence", headers=bob, json={}
-    )
+    heartbeat = client.post(f"/v1/schools/{SCHOOL}/chat/presence", headers=bob, json={})
     assert heartbeat.status_code == 200, heartbeat.text
     assert heartbeat.json()["delivered_messages"] == 1
     delivered = client.get(
@@ -497,12 +612,17 @@ def test_presence_marks_cross_page_delivery_and_exposes_typing_and_staff_details
         json={"conversation_id": conversation_id, "typing": False},
     )
     assert stopped.status_code == 200
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/members", headers=alice
-    ).json()[0]["typing"] is False
+    assert (
+        client.get(
+            f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/members", headers=alice
+        ).json()[0]["typing"]
+        is False
+    )
 
 
-def test_image_attachment_is_persisted_and_protected_by_conversation_membership(client, monkeypatch, tmp_path):
+def test_image_attachment_is_persisted_and_protected_by_conversation_membership(
+    client, monkeypatch, tmp_path
+):
     ids = _seed()
     alice = _headers(client, "alice.chat")
     bob = _headers(client, "bob.chat")
@@ -525,9 +645,12 @@ def test_image_attachment_is_persisted_and_protected_by_conversation_membership(
     )
     assert downloaded.status_code == 200
     assert downloaded.content.startswith(b"\x89PNG")
-    assert client.get(
-        f"/v1/schools/{SCHOOL}/chat/attachments/{attachment['id']}/file", headers=carol
-    ).status_code == 403
+    assert (
+        client.get(
+            f"/v1/schools/{SCHOOL}/chat/attachments/{attachment['id']}/file", headers=carol
+        ).status_code
+        == 403
+    )
 
 
 def test_message_edit_workflow_and_audit(client, monkeypatch):
@@ -620,6 +743,7 @@ def test_message_edit_workflow_and_audit(client, monkeypatch):
     # Cannot edit after 1 hour
     future_now = datetime.now(UTC) + timedelta(hours=2)
     import sis.api.routers.chat as chat_module
+
     old_datetime = chat_module.datetime
 
     class MockDatetime:

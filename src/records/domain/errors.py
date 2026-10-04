@@ -24,6 +24,7 @@ one message. A caller who could tell them apart could enumerate the student body
 detect custody restrictions by error code alone. `sis/` records which actually happened,
 in a table a school can query.
 """
+
 from __future__ import annotations
 
 

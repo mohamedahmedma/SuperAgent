@@ -21,6 +21,7 @@ There is deliberately no module-level `engine` or `SessionLocal`. Re-adding one 
 convenience would re-create the bug, because a caller that binds it at import captures the
 engine at import — which is exactly what this file no longer does.
 """
+
 from __future__ import annotations
 
 import logging

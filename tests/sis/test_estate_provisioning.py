@@ -9,6 +9,7 @@ Everything below the first section drives fakes. `plan_provision` is pure, so mo
 rules are testable with three strings and no I/O at all, which is the point of extracting
 it.
 """
+
 from pathlib import Path
 
 import pytest
@@ -97,9 +98,7 @@ def test_an_unset_template_is_refused_by_name() -> None:
 def test_a_database_name_postgresql_would_truncate_is_refused() -> None:
     """63 bytes is silent truncation, and two long codes sharing a prefix collide."""
     with pytest.raises(ValidationError):
-        plan_provision(
-            "A" * 60, template="postgresql://db:5432/sis_{slug}", existing_codes=()
-        )
+        plan_provision("A" * 60, template="postgresql://db:5432/sis_{slug}", existing_codes=())
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +140,7 @@ class RecordingConfig:
 
 def test_the_database_is_created_and_migrated_before_anything_is_recorded() -> None:
     provisioner, config = RecordingProvisioner(), RecordingConfig()
-    EstateService(provisioner, config).provision(
-        "NCS", template=POSTGRES, existing_codes=("MAIN",)
-    )
+    EstateService(provisioner, config).provision("NCS", template=POSTGRES, existing_codes=("MAIN",))
     assert provisioner.calls == ["exists", "create", "migrate"]
     assert config.written["SIS_SCHOOLS"] == "MAIN,NCS"
 
@@ -167,9 +164,7 @@ def test_a_failed_migration_records_nothing() -> None:
 def test_an_existing_database_stops_provisioning_before_it_creates() -> None:
     provisioner, config = RecordingProvisioner(exists=True), RecordingConfig()
     with pytest.raises(SchoolAlreadyProvisioned):
-        EstateService(provisioner, config).provision(
-            "NCS", template=POSTGRES, existing_codes=()
-        )
+        EstateService(provisioner, config).provision("NCS", template=POSTGRES, existing_codes=())
     assert provisioner.calls == ["exists"]
     assert config.written == {}
 
@@ -254,7 +249,7 @@ def test_the_provisioner_finds_the_real_alembic_config() -> None:
     with `sis/sis/alembic.ini` and every provision failed with alembic reporting a
     missing `script_location` -- a message that says nothing about the real cause.
     """
-    from sis.infrastructure.estate.provisioners import PROJECT_ROOT, _ALEMBIC_INI
+    from sis.infrastructure.estate.provisioners import _ALEMBIC_INI, PROJECT_ROOT
 
     assert (PROJECT_ROOT / "sis" / "app.py").exists()
     assert _ALEMBIC_INI.exists()

@@ -9,6 +9,7 @@ The fakes implement only the methods the service actually calls. A fake mirrorin
 full Protocol would quietly absorb a use case that started reaching for a query it has no
 business needing; here that reach is an `AttributeError` in a millisecond-long test.
 """
+
 from collections.abc import Collection, Mapping, Sequence
 from datetime import date
 
@@ -58,11 +59,7 @@ class _Levels:
         school with a year, no rungs, and a run that claimed success.
         """
         return sorted(
-            (
-                level
-                for level in self.rows.values()
-                if str(level.school_code) == str(school_code)
-            ),
+            (level for level in self.rows.values() if str(level.school_code) == str(school_code)),
             key=lambda level: level.sort_key,
         )
 
@@ -88,9 +85,7 @@ class _Sections:
     ) -> Sequence[ClassSection]:
         return [s for key, s in self.rows.items() if key[0] == str(academic_year_code)]
 
-    def upsert_many(
-        self, sections: Sequence[ClassSection]
-    ) -> Mapping[tuple[str, str], bool]:
+    def upsert_many(self, sections: Sequence[ClassSection]) -> Mapping[tuple[str, str], bool]:
         self.writes.append(tuple(str(s.code) for s in sections))
         flags: dict[tuple[str, str], bool] = {}
         for section in sections:
@@ -131,13 +126,17 @@ def _school(*, levels: Collection[YearLevel] = (), sections: Collection[ClassSec
     return _Uow(_Levels(*levels), _Sections(*sections))
 
 
-def _generate(uow: _Uow, command: GenerateStructureCommand, **kwargs: object) -> GenerateStructureResult:
+def _generate(
+    uow: _Uow, command: GenerateStructureCommand, **kwargs: object
+) -> GenerateStructureResult:
     # A factory, matching the real constructor: the service opens its own transaction.
     # Handing it an already-entered unit of work is what broke POST /v1/structure/generate.
     return StructureGenerationService(lambda: uow).generate(command, **kwargs)  # type: ignore[arg-type]
 
 
-def _codes(result: GenerateStructureResult, kind: str, *, created: bool | None = None) -> tuple[str, ...]:
+def _codes(
+    result: GenerateStructureResult, kind: str, *, created: bool | None = None
+) -> tuple[str, ...]:
     return tuple(
         item.code
         for item in result.items
@@ -176,7 +175,16 @@ def test_per_year_counts_run_through_the_same_path_as_uniform() -> None:
         uow, GenerateStructureCommand(academic_year_code=YEAR, classes_by_year={"Y1": 3, "Y2": 5})
     )
 
-    assert _codes(result, "class_section") == ("Y1A", "Y1B", "Y1C", "Y2A", "Y2B", "Y2C", "Y2D", "Y2E")
+    assert _codes(result, "class_section") == (
+        "Y1A",
+        "Y1B",
+        "Y1C",
+        "Y2A",
+        "Y2B",
+        "Y2C",
+        "Y2D",
+        "Y2E",
+    )
     assert result.created_count == 10
     assert ("2025-2026", "Y2E") in uow.class_sections.rows
 
@@ -189,9 +197,7 @@ def test_rerunning_the_same_request_creates_nothing_and_keeps_renamed_labels() -
     registrar's "Third Primary". Idempotent here means *no write was sent*, not that the
     database absorbed one.
     """
-    command = GenerateStructureCommand(
-        academic_year_code=YEAR, year_count=5, classes_per_year=8
-    )
+    command = GenerateStructureCommand(academic_year_code=YEAR, year_count=5, classes_per_year=8)
     uow = _school()
     _generate(uow, command)
     uow.year_levels.rows["Y3"] = uow.year_levels.rows["Y3"].renamed(name_en="Third Primary")
@@ -208,9 +214,7 @@ def test_rerunning_the_same_request_creates_nothing_and_keeps_renamed_labels() -
 
 
 def test_a_sixth_year_is_added_without_touching_the_first_five() -> None:
-    command = GenerateStructureCommand(
-        academic_year_code=YEAR, year_count=5, classes_per_year=8
-    )
+    command = GenerateStructureCommand(academic_year_code=YEAR, year_count=5, classes_per_year=8)
     uow = _school()
     _generate(uow, command)
     uow.year_levels.writes.clear()
@@ -256,7 +260,13 @@ def test_a_conflicting_code_convention_is_refused_before_any_write() -> None:
     """
     uow = _school(
         levels=[
-            YearLevel(code=YearCode(f"G{n}"), school_code="MAIN", name_en=f"Grade {n}", name_ar=f"صف {n}", display_order=n)
+            YearLevel(
+                code=YearCode(f"G{n}"),
+                school_code="MAIN",
+                name_en=f"Grade {n}",
+                name_ar=f"صف {n}",
+                display_order=n,
+            )
             for n in (1, 2, 3)
         ]
     )
@@ -276,7 +286,15 @@ def test_a_conflicting_code_convention_is_refused_before_any_write() -> None:
 
 def test_a_second_ladder_is_built_when_a_human_states_it_explicitly() -> None:
     uow = _school(
-        levels=[YearLevel(code=YearCode("G1"), school_code="MAIN", name_en="Grade 1", name_ar="صف ١", display_order=1)]
+        levels=[
+            YearLevel(
+                code=YearCode("G1"),
+                school_code="MAIN",
+                name_en="Grade 1",
+                name_ar="صف ١",
+                display_order=1,
+            )
+        ]
     )
 
     result = _generate(

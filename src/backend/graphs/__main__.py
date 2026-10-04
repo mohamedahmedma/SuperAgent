@@ -4,6 +4,7 @@ Run on the way into the server the same way the schema upgrade is, from the imag
 There it is off unless `GRAPHS_DRAW_ON_START` says otherwise, and it never fails the
 chain: a diagram is not worth refusing to start for.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -15,8 +16,12 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Draw the turn flow as a PNG.")
     parser.add_argument("--profile", help="profile to draw (default: ACTIVE_PROFILE from .env)")
     parser.add_argument("--out", type=Path, help="output directory (default: $GRAPHS_OUTPUT_DIR)")
-    parser.add_argument("--parts", action="store_true", help="also draw each compiled graph on its own")
-    parser.add_argument("--check", action="store_true", help="verify the map against the code, draw nothing")
+    parser.add_argument(
+        "--parts", action="store_true", help="also draw each compiled graph on its own"
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="verify the map against the code, draw nothing"
+    )
     parser.add_argument(
         "--on-start",
         action="store_true",
@@ -59,7 +64,9 @@ def _draw(args) -> int:
 
     stale = stale_references()
     if stale:
-        print("The flow map names code that no longer exists — update STEPS in backend/graphs/flow.py:")
+        print(
+            "The flow map names code that no longer exists — update STEPS in backend/graphs/flow.py:"
+        )
         for ref in stale:
             print(f"  {ref}")
         return 0 if args.on_start else 2
@@ -67,7 +74,9 @@ def _draw(args) -> int:
     parts = compile_parts()
     chart, _ = build_flow(parts)
     if args.check:
-        print(f"flow map OK for profile {parts.profile_name!r}: {len(chart.nodes)} steps, {len(chart.edges)} edges")
+        print(
+            f"flow map OK for profile {parts.profile_name!r}: {len(chart.nodes)} steps, {len(chart.edges)} edges"
+        )
         return 0
 
     out = args.out or output_dir()

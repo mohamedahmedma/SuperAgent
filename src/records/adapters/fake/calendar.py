@@ -1,4 +1,5 @@
 """A calendar held in a list. The default when no SIS is configured."""
+
 from __future__ import annotations
 
 from records.domain.errors import CalendarUnavailable

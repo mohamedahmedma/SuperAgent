@@ -19,6 +19,7 @@ equipment differ by a YAML block, not by a code path — and because the filter 
 generated from the same declaration, the agent literally cannot invent a filter key
 that the store does not index.
 """
+
 from __future__ import annotations
 
 import logging
@@ -144,10 +145,14 @@ class AttributeSchema:
         fields: Dict[str, tuple] = {}
         for spec in self._specs.values():
             annotation = List[spec.python_type()] if spec.multi else Optional[spec.python_type()]
-            default = Field(
-                default_factory=list if spec.multi else None,
-                description=spec.prompt_line().lstrip("- "),
-            ) if spec.multi else Field(default=None, description=spec.prompt_line().lstrip("- "))
+            default = (
+                Field(
+                    default_factory=list if spec.multi else None,
+                    description=spec.prompt_line().lstrip("- "),
+                )
+                if spec.multi
+                else Field(default=None, description=spec.prompt_line().lstrip("- "))
+            )
             fields[spec.name] = (annotation, default)
         return create_model(name, __config__=ConfigDict(extra="ignore"), **fields)
 
@@ -237,7 +242,9 @@ class AttributeSchema:
 
     # -- evaluation -------------------------------------------------------------
 
-    def matches(self, attributes: Optional[Dict[str, Any]], filters: Optional[Dict[str, Any]]) -> bool:
+    def matches(
+        self, attributes: Optional[Dict[str, Any]], filters: Optional[Dict[str, Any]]
+    ) -> bool:
         """Whether an entity's attributes satisfy a filter set (AND across keys)."""
         if not filters:
             return True
@@ -259,7 +266,11 @@ class AttributeSchema:
             return False
 
         if spec.type is AttributeType.NUMBER:
-            bounds = condition if isinstance(condition, NumberRange) else NumberRange.model_validate(condition)
+            bounds = (
+                condition
+                if isinstance(condition, NumberRange)
+                else NumberRange.model_validate(condition)
+            )
             if bounds.is_empty():
                 return True
             values = value if isinstance(value, list) else [value]
@@ -275,7 +286,9 @@ class AttributeSchema:
         held = value if isinstance(value, list) else [value]
         return any(str(item).strip().lower() in wanted_lower for item in held)
 
-    def validate_filters(self, filters: Optional[Dict[str, Any]]) -> Tuple[Dict[str, Any], List[str]]:
+    def validate_filters(
+        self, filters: Optional[Dict[str, Any]]
+    ) -> Tuple[Dict[str, Any], List[str]]:
         """Split a filter payload into (usable, rejected-reasons).
 
         Rejections are returned rather than raised so the tool can tell the agent what
@@ -288,14 +301,20 @@ class AttributeSchema:
                 continue
             spec = self._specs.get(key)
             if spec is None:
-                problems.append(f"unknown attribute {key!r} (known: {', '.join(self.names()) or 'none'})")
+                problems.append(
+                    f"unknown attribute {key!r} (known: {', '.join(self.names()) or 'none'})"
+                )
                 continue
             if not spec.filterable:
                 problems.append(f"{key!r} is not filterable")
                 continue
             if spec.type is AttributeType.NUMBER:
                 try:
-                    bounds = condition if isinstance(condition, NumberRange) else NumberRange.model_validate(condition)
+                    bounds = (
+                        condition
+                        if isinstance(condition, NumberRange)
+                        else NumberRange.model_validate(condition)
+                    )
                 except Exception:
                     problems.append(f"{key!r} expects a range like {{min, max}}")
                     continue
@@ -307,7 +326,9 @@ class AttributeSchema:
                 continue
 
             wanted = condition if isinstance(condition, (list, tuple, set)) else [condition]
-            cleaned = [str(item).strip() for item in wanted if item is not None and str(item).strip()]
+            cleaned = [
+                str(item).strip() for item in wanted if item is not None and str(item).strip()
+            ]
             if spec.values:
                 allowed = {item.lower(): item for item in spec.values}
                 canonical = [allowed[item.lower()] for item in cleaned if item.lower() in allowed]

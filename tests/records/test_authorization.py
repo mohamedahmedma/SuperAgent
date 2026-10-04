@@ -8,6 +8,7 @@ Every parent-facing call now carries two credentials: the agent's API key and a
 signed identity token naming the guardian. Tests for the second live in
 `test_identity.py`; these assume it is valid and exercise the link table behind it.
 """
+
 from tests.records.conftest import agent_headers
 
 
@@ -17,7 +18,9 @@ def test_no_key_is_rejected(client):
 
 
 def test_invalid_key_is_rejected(client):
-    response = client.get("/v1/guardians/G-1/students", headers={"X-API-Key": "nope-not-a-real-key"})
+    response = client.get(
+        "/v1/guardians/G-1/students", headers={"X-API-Key": "nope-not-a-real-key"}
+    )
     assert response.status_code == 401
 
 
@@ -177,9 +180,7 @@ def test_the_guardian_reaches_the_backend_on_a_grades_read(client, fake_lms):
 
 
 def test_the_guardian_reaches_the_backend_on_an_attendance_read(client, fake_lms):
-    client.get(
-        "/v1/guardians/G-1/students/S-1001/attendance", headers=agent_headers("G-1")
-    )
+    client.get("/v1/guardians/G-1/students/S-1001/attendance", headers=agent_headers("G-1"))
 
     assert fake_lms.asked, "the backend was never asked at all"
     assert all(guardian == "G-1" for _, _, guardian in fake_lms.asked)

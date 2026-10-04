@@ -34,6 +34,7 @@ What is asserted here, and why each is a way the architecture quietly stops work
     guard still reaches the right verdict, and the two hooks that can jump have a
     defined precedence.
 """
+
 import asyncio
 import threading
 import unittest
@@ -98,9 +99,7 @@ class _Copy:
 
 def _plan(child=None, *, agent=None, question="q", **signal_kwargs):
     signals = RequestSignals(question=question, **signal_kwargs)
-    return resolve_turn(
-        signals, agent_config=agent or _Agent(), copy_config=_Copy(), child=child
-    )
+    return resolve_turn(signals, agent_config=agent or _Agent(), copy_config=_Copy(), child=child)
 
 
 def _settled(roster=(LAYLA,)):
@@ -138,9 +137,7 @@ class ThePlanIsASetOfCalls(unittest.TestCase):
         by_name = {call["name"]: call["args"] for call in plan.planned_calls}
         self.assertEqual(by_name[KNOWLEDGE_TOOL], {"query": "درجات ليلى كام والمصاريف كام؟"})
         # The label the ROSTER matched, not a name a model transcribed.
-        self.assertEqual(
-            by_name[RECORDS_TOOL], {"student_name": "ليلى أحمد"}
-        )
+        self.assertEqual(by_name[RECORDS_TOOL], {"student_name": "ليلى أحمد"})
 
     def test_nothing_is_forced_when_a_set_is_dispatched(self):
         """`tool_choice` names one function. Setting it beside a dispatched set would
@@ -168,6 +165,7 @@ class ThePlanIsASetOfCalls(unittest.TestCase):
     def test_a_planned_call_never_names_a_tool_the_profile_does_not_bind(self):
         """A plan naming an unbound tool reaches the graph as a call for a tool that does
         not exist, which the provider rejects for the whole turn."""
+
         class _KnowledgeOnly(_Agent):
             tools = [KNOWLEDGE_TOOL]
 
@@ -176,9 +174,7 @@ class ThePlanIsASetOfCalls(unittest.TestCase):
         # The unbound tool is gone from the plan; the bound one is still dispatched. This
         # is the assertion the lone-call rule used to make for free, and it is the one
         # that actually matters — emptiness proved nothing about WHICH name survived.
-        self.assertEqual(
-            [call["name"] for call in plan.planned_calls], [KNOWLEDGE_TOOL]
-        )
+        self.assertEqual([call["name"] for call in plan.planned_calls], [KNOWLEDGE_TOOL])
 
     def test_the_trace_reports_the_names_and_never_the_arguments(self):
         """This trace is persisted per message and streamed to the browser, and a planned
@@ -194,6 +190,7 @@ class EveryFailureFallsBackToTheOrdinaryLoop(unittest.TestCase):
     def test_the_switch_off_reproduces_todays_behaviour_exactly(self):
         """The tools are still narrowed to what the turn needs — that is selection, and
         it predates this feature. What the switch controls is whether they are CALLED."""
+
         class _Off(_Agent):
             parallel_tool_calls = False
 
@@ -211,6 +208,7 @@ class EveryFailureFallsBackToTheOrdinaryLoop(unittest.TestCase):
     def test_a_tool_with_no_argument_template_is_left_to_the_model(self):
         """What makes this adoptable one tool at a time: an undeclared tool stays bound
         and behaves exactly as it did before."""
+
         class _KnowledgeOnlyArgs(_Agent):
             planned_tool_arguments = {KNOWLEDGE_TOOL: {"query": "$resolved_question"}}
 
@@ -219,12 +217,11 @@ class EveryFailureFallsBackToTheOrdinaryLoop(unittest.TestCase):
         # The undeclared tool is absent from the plan and still BOUND above, which is the
         # whole of "left to the model". The declared one is dispatched — adoption one
         # tool at a time means the declared half works, not that neither half does.
-        self.assertEqual(
-            [call["name"] for call in plan.planned_calls], [KNOWLEDGE_TOOL]
-        )
+        self.assertEqual([call["name"] for call in plan.planned_calls], [KNOWLEDGE_TOOL])
 
     def test_an_unknown_placeholder_drops_its_argument_rather_than_sending_the_text(self):
         """A typo in a profile must not become a child's name."""
+
         class _Typo(_Agent):
             planned_tool_arguments = {
                 KNOWLEDGE_TOOL: {"query": "$resolved_question"},
@@ -240,8 +237,9 @@ class EveryFailureFallsBackToTheOrdinaryLoop(unittest.TestCase):
         tool handles better from its own default than from an explicit blank."""
         # `needed_tools` reaches the plan without a resolved child, so `$child_label` is
         # empty and the records call has nothing left in it.
-        plan = _plan(no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL],
-                     resolved_question="q")
+        plan = _plan(
+            no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL], resolved_question="q"
+        )
         # The records call is what must not be made, and it is not made. What survives is
         # the knowledge call, whose argument resolved to something.
         self.assertNotIn(RECORDS_TOOL, [call["name"] for call in plan.planned_calls])
@@ -250,15 +248,17 @@ class EveryFailureFallsBackToTheOrdinaryLoop(unittest.TestCase):
         """One call ahead of the model overlaps with nothing, and still removes the model
         round-trip that would have produced it. On this deployment the single-tool turn is
         the common case, so excluding it collected the saving only where it was rarest."""
-        plan = _plan(no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL],
-                     resolved_question="q")
-        self.assertEqual(
-            plan.planned_calls, [{"name": KNOWLEDGE_TOOL, "args": {"query": "q"}}]
+        plan = _plan(
+            no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL], resolved_question="q"
         )
+        self.assertEqual(plan.planned_calls, [{"name": KNOWLEDGE_TOOL, "args": {"query": "q"}}])
 
     def test_an_unsettled_child_is_asked_about_rather_than_dispatched_for(self):
-        plan = _plan(resolve_child(reference="child", roster=[LAYLA, OMAR]),
-                     about_child=True, needed_tools=[KNOWLEDGE_TOOL, GRADES_TOOL])
+        plan = _plan(
+            resolve_child(reference="child", roster=[LAYLA, OMAR]),
+            about_child=True,
+            needed_tools=[KNOWLEDGE_TOOL, GRADES_TOOL],
+        )
         self.assertEqual(plan.planned_calls, [])
         self.assertTrue(plan.short_circuit)
 
@@ -307,8 +307,12 @@ class SelectionGeneralisesPastTwoTools(unittest.TestCase):
                 f"tool_{i}": {"query": "$resolved_question"} for i in range(10)
             }
 
-        plan = _plan(no_child("n/a"), agent=_Ten(), resolved_question="q",
-                     needed_tools=["tool_1", "tool_4", "tool_7"])
+        plan = _plan(
+            no_child("n/a"),
+            agent=_Ten(),
+            resolved_question="q",
+            needed_tools=["tool_1", "tool_4", "tool_7"],
+        )
         self.assertEqual(plan.exposed_tools, ["tool_1", "tool_4", "tool_7"])
         self.assertEqual(
             [call["name"] for call in plan.planned_calls],
@@ -319,15 +323,21 @@ class SelectionGeneralisesPastTwoTools(unittest.TestCase):
         """It is a fact about the MESSAGE, so it is just as meaningful on a deployment
         that has no children at all — unlike `child_question_kind`, which is only
         meaningful once a real child has been resolved against a roster."""
-        plan = _plan(no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL],
-                     resolved_question="q")
+        plan = _plan(
+            no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL], resolved_question="q"
+        )
         self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL, RECORDS_TOOL])
 
     def test_the_classifier_list_refines_the_question_kind_enum(self):
         """Where the two agree, the finer answer wins: `records` says which family, the
         list says which member, and the member is what gets dispatched."""
-        plan = _plan(_settled(), about_child=True, child_question_kind="records",
-                     needed_tools=[ATTENDANCE_TOOL], resolved_question="q")
+        plan = _plan(
+            _settled(),
+            about_child=True,
+            child_question_kind="records",
+            needed_tools=[ATTENDANCE_TOOL],
+            resolved_question="q",
+        )
         self.assertEqual(plan.exposed_tools, [ATTENDANCE_TOOL])
         self.assertEqual(plan.forced_tool, ATTENDANCE_TOOL)
 
@@ -341,27 +351,36 @@ class SelectionGeneralisesPastTwoTools(unittest.TestCase):
         contradiction falls back to the family, which is the coarser, measured and safer
         of the two readings.
         """
-        plan = _plan(_settled(), about_child=True, child_question_kind="records",
-                     needed_tools=[KNOWLEDGE_TOOL], resolved_question="q")
+        plan = _plan(
+            _settled(),
+            about_child=True,
+            child_question_kind="records",
+            needed_tools=[KNOWLEDGE_TOOL],
+            resolved_question="q",
+        )
         # The family, intersected with what this profile actually binds — `_Agent` ships
         # no subject tool, and a plan may never name a tool `build_tools` would reject.
-        self.assertEqual(
-            plan.exposed_tools, [t for t in _Agent.tools if t in RECORDS_TOOLS]
-        )
+        self.assertEqual(plan.exposed_tools, [t for t in _Agent.tools if t in RECORDS_TOOLS])
         self.assertNotIn(KNOWLEDGE_TOOL, plan.exposed_tools)
         self.assertEqual(plan.planned_calls, [])
 
     def test_both_spans_the_families_so_nothing_contradicts_it(self):
         """`both` names no family, so a list spanning each side is not caught by the
         contradiction rule — which is the case the parallel dispatch exists for."""
-        plan = _plan(_settled(), about_child=True, child_question_kind="both",
-                     needed_tools=[KNOWLEDGE_TOOL, GRADES_TOOL], resolved_question="q")
+        plan = _plan(
+            _settled(),
+            about_child=True,
+            child_question_kind="both",
+            needed_tools=[KNOWLEDGE_TOOL, GRADES_TOOL],
+            resolved_question="q",
+        )
         self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL, GRADES_TOOL])
         self.assertEqual(len(plan.planned_calls), 2)
 
     def test_a_name_the_profile_does_not_bind_is_dropped(self):
-        plan = _plan(no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, "invented_tool"],
-                     resolved_question="q")
+        plan = _plan(
+            no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, "invented_tool"], resolved_question="q"
+        )
         self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL])
 
     def test_selection_naming_nothing_bindable_leaves_everything_bound(self):
@@ -396,9 +415,7 @@ class TheClassifierReadsItsOwnCatalogue(unittest.TestCase):
     def test_the_order_is_the_catalogues_and_not_the_models(self):
         """Two plans naming the same tools must be the same plan, or an identical
         question produces a different `exposed_tools` on every turn."""
-        self.assertEqual(
-            self._read([GRADES_TOOL, KNOWLEDGE_TOOL]), [KNOWLEDGE_TOOL, GRADES_TOOL]
-        )
+        self.assertEqual(self._read([GRADES_TOOL, KNOWLEDGE_TOOL]), [KNOWLEDGE_TOOL, GRADES_TOOL])
 
     def test_anything_that_is_not_a_list_is_an_abstention(self):
         for answer in (None, "", "search_knowledge_base", 7, {}):
@@ -425,27 +442,33 @@ class TheDispatchArithmetic(unittest.TestCase):
         return runtime.planned_tool_calls(planned, made or {})
 
     def test_every_call_gets_an_id_because_results_are_matched_by_it(self):
-        calls = self._calls([
-            {"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
-            {"name": RECORDS_TOOL, "args": {"student_name": "ليلى"}},
-        ])
+        calls = self._calls(
+            [
+                {"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
+                {"name": RECORDS_TOOL, "args": {"student_name": "ليلى"}},
+            ]
+        )
         ids = [call["id"] for call in calls]
         self.assertEqual(len(set(ids)), 2)
         self.assertTrue(all(ids))
 
     def test_the_same_plan_produces_the_same_ids_twice(self):
-        planned = [{"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
-                   {"name": RECORDS_TOOL, "args": {"student_name": "ليلى"}}]
+        planned = [
+            {"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
+            {"name": RECORDS_TOOL, "args": {"student_name": "ليلى"}},
+        ]
         self.assertEqual(
             [c["id"] for c in self._calls(planned)],
             [c["id"] for c in self._calls(planned)],
         )
 
     def test_a_repeated_call_is_collapsed_by_the_rule_that_already_exists(self):
-        calls = self._calls([
-            {"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
-            {"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
-        ])
+        calls = self._calls(
+            [
+                {"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
+                {"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
+            ]
+        )
         self.assertEqual(len(calls), 1)
 
     def test_a_call_past_its_budget_is_dropped(self):
@@ -453,18 +476,22 @@ class TheDispatchArithmetic(unittest.TestCase):
         could overspend it would be a second, invisible budget."""
         spent = {KNOWLEDGE_TOOL: runtime.budget_for(KNOWLEDGE_TOOL)}
         calls = self._calls(
-            [{"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
-             {"name": RECORDS_TOOL, "args": {"student_name": "ليلى"}}],
+            [
+                {"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
+                {"name": RECORDS_TOOL, "args": {"student_name": "ليلى"}},
+            ],
             made=spent,
         )
         self.assertEqual([call["name"] for call in calls], [RECORDS_TOOL])
 
     def test_a_malformed_plan_entry_is_skipped_rather_than_dispatched(self):
-        calls = self._calls([
-            {"name": "", "args": {"query": "q"}},
-            {"name": KNOWLEDGE_TOOL, "args": "not a dict"},
-            {"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
-        ])
+        calls = self._calls(
+            [
+                {"name": "", "args": {"query": "q"}},
+                {"name": KNOWLEDGE_TOOL, "args": "not a dict"},
+                {"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
+            ]
+        )
         self.assertEqual([call["name"] for call in calls], [KNOWLEDGE_TOOL])
 
 
@@ -602,9 +629,7 @@ class TheToolsActuallyOverlap(unittest.TestCase):
         )
 
         self.assertTrue(meeting.overlapped, "the two tools did not run concurrently")
-        self.assertEqual(
-            len([m for m in out["messages"] if isinstance(m, ToolMessage)]), 2
-        )
+        self.assertEqual(len([m for m in out["messages"] if isinstance(m, ToolMessage)]), 2)
 
     def test_the_whole_turn_costs_one_model_call(self):
         """The larger saving. Discovered one at a time these two tools cost three calls —
@@ -612,9 +637,7 @@ class TheToolsActuallyOverlap(unittest.TestCase):
         meeting = _Meeting()
         ctx = _ctx(PLANNED)
         model, calls = _scripted(AIMessage(content="done"))
-        _agent(ctx, meeting.tools(), model).invoke(
-            {"messages": [HumanMessage(content="q")]}
-        )
+        _agent(ctx, meeting.tools(), model).invoke({"messages": [HumanMessage(content="q")]})
         self.assertEqual(calls["n"], 1)
 
     def test_the_planned_arguments_are_what_the_tools_receive(self):
@@ -652,9 +675,10 @@ class TheToolsActuallyOverlap(unittest.TestCase):
 
         ctx = _ctx([])
         model, calls = _scripted(
-            AIMessage(content="", tool_calls=[
-                {"name": KNOWLEDGE_TOOL, "args": {"query": "asked for"}, "id": "a"}
-            ]),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": KNOWLEDGE_TOOL, "args": {"query": "asked for"}, "id": "a"}],
+            ),
             AIMessage(content="done"),
         )
         _agent(ctx, [search_knowledge_base], model).invoke(
@@ -746,11 +770,16 @@ class ThePlannerIsNotGivenTheLastWord(unittest.TestCase):
         ctx = _ctx(PLANNED)
         model, _ = _scripted(
             # The plan read marks; the parent also wanted absences.
-            AIMessage(content="", tool_calls=[{
-                "name": ATTENDANCE_TOOL,
-                "args": {"student_name": "ليلى أحمد"},
-                "id": "fix",
-            }]),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": ATTENDANCE_TOOL,
+                        "args": {"student_name": "ليلى أحمد"},
+                        "id": "fix",
+                    }
+                ],
+            ),
             AIMessage(content="غابت يومين"),
         )
         _agent(ctx, [search_knowledge_base, get_student_attendance], model).invoke(
@@ -786,7 +815,7 @@ class TheSeededCallsAreCountedAgainstTheirBudgets(unittest.TestCase):
         script whatever it was offered — so an agent-level assertion here would pass on a
         middleware that had stopped withholding anything at all.
         """
-        from backend.agent.profiles.registry import load_profile, set_profile
+        from backend.profiles.registry import load_profile, set_profile
 
         # One knowledge call is the base profile's whole budget for a turn, so one seeded
         # call is enough to spend it. Named here rather than read from whichever profile
@@ -853,7 +882,8 @@ class TheTwoJumpingHooksHaveADefinedPrecedence(unittest.TestCase):
             runtime.create_agent = real
 
         hooks = [
-            type(m).__name__ for m in captured["middleware"]
+            type(m).__name__
+            for m in captured["middleware"]
             if hasattr(type(m), "before_model")
             and type(m).before_model is not AgentMiddleware.before_model
         ]

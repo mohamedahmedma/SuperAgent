@@ -8,14 +8,15 @@ version of it would pass while production failed.
 Everything written lives under a per-run profile or username and is deleted afterwards.
 Nothing here deletes by a broad predicate.
 """
+
 import threading
 import unittest
 import uuid
 
 from sqlalchemy import text
 
-from backend.indexing.section_summary import SectionRecord, sections_fingerprint
 from backend.application.ports.repositories import DigestRecord
+from backend.indexing.section_summary import SectionRecord, sections_fingerprint
 from backend.indexing.summary_store import SectionCatalogueStore
 from backend.infra.database import engine
 from tests.general.integration_support import TEST_PREFIX, requires_postgres, temporary_profile
@@ -86,7 +87,9 @@ class SectionSummaryRoundTripTests(unittest.TestCase):
         before_cursor_execute listener strips it. SQLite accepts NUL happily and would
         hide this failure entirely — which is why it is tested here and not there."""
         with temporary_profile() as profile:
-            catalogue.save_records(profile, [record("s1", ("clean\x00question?",), [[0.1]], summary="a\x00b")])
+            catalogue.save_records(
+                profile, [record("s1", ("clean\x00question?",), [[0.1]], summary="a\x00b")]
+            )
             self.assertEqual(1, len(catalogue.load_records(profile)))
 
     def test_text_columns_are_stripped_of_nul(self):
@@ -189,7 +192,9 @@ class CorpusDigestTests(unittest.TestCase):
         """`paragraph` is Text, not String(n). A truncated corpus description would
         silently narrow the scope gate."""
         with temporary_profile() as profile:
-            paragraph = ("The school covers admissions, fees, uniform and transport. " * 300).strip()
+            paragraph = (
+                "The school covers admissions, fees, uniform and transport. " * 300
+            ).strip()
             catalogue.save_digest(profile, DigestRecord(paragraph=paragraph))
             self.assertEqual(paragraph, catalogue.load_digest(profile).paragraph)
             self.assertGreater(len(paragraph), 15000)
@@ -205,16 +210,19 @@ class CorpusDigestTests(unittest.TestCase):
             first = [record("s1", sha="a"), record("s2", sha="b")]
             catalogue.save_records(profile, first)
             stored = catalogue.load_records(profile)
-            catalogue.save_digest(profile, DigestRecord(
-                paragraph="p", sections_sha256=sections_fingerprint(stored)))
+            catalogue.save_digest(
+                profile, DigestRecord(paragraph="p", sections_sha256=sections_fingerprint(stored))
+            )
 
             self.assertEqual(
-                catalogue.load_digest(profile).sections_sha256, sections_fingerprint(catalogue.load_records(profile))
+                catalogue.load_digest(profile).sections_sha256,
+                sections_fingerprint(catalogue.load_records(profile)),
             )
 
             catalogue.save_records(profile, [record("s2", sha="EDITED")])
             self.assertNotEqual(
-                catalogue.load_digest(profile).sections_sha256, sections_fingerprint(catalogue.load_records(profile))
+                catalogue.load_digest(profile).sections_sha256,
+                sections_fingerprint(catalogue.load_records(profile)),
             )
 
     def test_digests_are_per_profile(self):
@@ -314,8 +322,15 @@ class SchemaTests(unittest.TestCase):
 
         columns = {c["name"] for c in inspect(engine).get_columns("corpus_digests")}
         for expected in (
-            "profile", "paragraph", "sections_sha256", "section_count",
-            "floor", "floor_sha256", "question_count", "model_used", "updated_at",
+            "profile",
+            "paragraph",
+            "sections_sha256",
+            "section_count",
+            "floor",
+            "floor_sha256",
+            "question_count",
+            "model_used",
+            "updated_at",
         ):
             self.assertIn(expected, columns)
 

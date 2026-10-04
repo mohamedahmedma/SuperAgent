@@ -25,9 +25,11 @@ protect has already been spent.
 import that records who it says it is records nothing; a prefix is the handle an operator
 can revoke, and it is the one identity this layer actually knows.
 """
+
 import re
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Final, Protocol
@@ -36,16 +38,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from sis.api.deps import (
-    Caller,
+    Principal,
     get_grade_import_service,
     get_guardian_import_service,
     get_import_reports,
     get_roster_import_service,
-    require_registrar,
-    Principal,
     require_permission,
 )
-from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
 from sis.application.dto import (
     GradeCommitCommand,
@@ -60,6 +59,7 @@ from sis.application.dto import (
     RosterPreviewCommand,
     RowCode,
 )
+
 # The DTO's `RowOutcome` is the per-row diagnostic returned by preview and commit; the
 # domain's is the write verb stored on a row. Both are needed here, so the diagnostic is
 # aliased and the enum keeps the name it carries in the repository contract.
@@ -71,7 +71,9 @@ from sis.application.services import (
 )
 from sis.config import Settings, get_settings
 from sis.domain.imports import ImportBatch, ImportKind, ImportRow, ImportStatus, RowOutcome
+from sis.domain.rbac import Permission
 from sis.domain.value_objects import AcademicYearCode, ClassCode, SubjectCode, TermCode, YearCode
+
 # One source of truth for what the door accepts, so the extension check here and the
 # parser's own refusal cannot drift into accepting a file the layer below rejects.
 from sis.infrastructure.parsers import SUPPORTED_EXTENSIONS
@@ -120,9 +122,7 @@ _DISPOSITION_PARAM: Final[re.Pattern[bytes]] = re.compile(
 )
 
 
-def _refuse(
-    status_code: int, code: str, message: str, field: str | None = None
-) -> HTTPException:
+def _refuse(status_code: int, code: str, message: str, field: str | None = None) -> HTTPException:
     """The same envelope `domain_errors()` produces, for refusals this layer makes itself."""
     return HTTPException(
         status_code=status_code,
@@ -177,9 +177,7 @@ def _boundary_of(content_type: str) -> bytes:
             boundary = value.strip().strip('"')
             if boundary:
                 return boundary.encode("ascii", "ignore")
-    raise _refuse(
-        400, "unreadable_file", "the multipart body states no boundary", "content-type"
-    )
+    raise _refuse(400, "unreadable_file", "the multipart body states no boundary", "content-type")
 
 
 def _disposition(head: bytes) -> tuple[str | None, str | None]:
@@ -291,8 +289,7 @@ class RowOutcomeOut(BaseModel):
     )
     message: str = Field(
         default="",
-        description="Prose for a human. Nothing may branch on its wording — it is "
-        "translated.",
+        description="Prose for a human. Nothing may branch on its wording — it is translated.",
     )
     field: str | None = Field(
         default=None, description="Which column failed, when a single one did."
@@ -422,9 +419,7 @@ class ImportReportOut(BaseModel):
     rows: list[ImportRowOut]
 
     @classmethod
-    def of(
-        cls, batch: ImportBatch, page: Page[ImportRow], *, now: datetime
-    ) -> "ImportReportOut":
+    def of(cls, batch: ImportBatch, page: Page[ImportRow], *, now: datetime) -> "ImportReportOut":
         return cls(
             batch_id=batch.batch_id,
             kind=batch.kind,
@@ -450,9 +445,7 @@ _PREVIEW_ERRORS = error_responses(400, 401, 403, 404, 413, 415, 422)
 _COMMIT_ERRORS = error_responses(401, 403, 404, 409, 410, 422)
 
 
-def _multipart_body(
-    *, required: Mapping[str, str], optional: Mapping[str, str]
-) -> dict[str, Any]:
+def _multipart_body(*, required: Mapping[str, str], optional: Mapping[str, str]) -> dict[str, Any]:
     """Describe the upload form by hand, because the handler deliberately cannot.
 
     FastAPI infers a request body from the parameters it parses, and these routes parse
@@ -537,13 +530,9 @@ async def preview_roster(
     "of the same batch is refused, which is what makes a double-clicked button safe.",
     responses=_COMMIT_ERRORS,
 )
-def commit_roster(
-    batch_id: str, imports: RosterImports, caller: Registrar
-) -> ImportCommitOut:
+def commit_roster(batch_id: str, imports: RosterImports, caller: Registrar) -> ImportCommitOut:
     with domain_errors():
-        result = imports.commit(
-            RosterCommitCommand(batch_id=batch_id, actor=caller.prefix)
-        )
+        result = imports.commit(RosterCommitCommand(batch_id=batch_id, actor=caller.prefix))
     return ImportCommitOut.of(result)
 
 
@@ -586,13 +575,9 @@ async def preview_guardians(
     "of the same batch is refused, which is what makes a double-clicked button safe.",
     responses=_COMMIT_ERRORS,
 )
-def commit_guardians(
-    batch_id: str, imports: GuardianImports, caller: Registrar
-) -> ImportCommitOut:
+def commit_guardians(batch_id: str, imports: GuardianImports, caller: Registrar) -> ImportCommitOut:
     with domain_errors():
-        result = imports.commit(
-            GuardianCommitCommand(batch_id=batch_id, actor=caller.prefix)
-        )
+        result = imports.commit(GuardianCommitCommand(batch_id=batch_id, actor=caller.prefix))
     return ImportCommitOut.of(result)
 
 
@@ -645,9 +630,7 @@ async def preview_grades(
     "stored exactly as stated — nothing is averaged, weighted or rescaled.",
     responses=_COMMIT_ERRORS,
 )
-def commit_grades(
-    batch_id: str, imports: GradeImports, caller: Registrar
-) -> ImportCommitOut:
+def commit_grades(batch_id: str, imports: GradeImports, caller: Registrar) -> ImportCommitOut:
     with domain_errors():
         result = imports.commit(GradeCommitCommand(batch_id=batch_id, actor=caller.prefix))
     return ImportCommitOut.of(result)

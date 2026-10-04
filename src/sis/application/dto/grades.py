@@ -11,9 +11,17 @@ system that reports a child as having scored 0% in a subject nobody has marked y
 re-derived as `percentage is not None` at each call site — where sooner or later somebody
 writes `percentage or 0.0` and the rule dies quietly.
 """
+
 from dataclasses import dataclass
 
-from sis.domain.value_objects import ClassCode, Percentage, StudentNumber, SubjectCode, TermCode, YearCode
+from sis.domain.value_objects import (
+    ClassCode,
+    Percentage,
+    StudentNumber,
+    SubjectCode,
+    TermCode,
+    YearCode,
+)
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,6 +11,7 @@ something. What replaces it is stronger where it counts: a shared secret has no 
 and the reason the binding route is audited separately — had no answer while one key was
 held by every script and every operator. Now the caller is a named account.
 """
+
 from fastapi import APIRouter, Query, Response, status
 
 from identity.api.deps import AdminServiceDep, AdminSubject
@@ -26,9 +27,7 @@ router = APIRouter(prefix="/v1/admin", tags=["admin"])
 
 
 @router.post("/accounts", response_model=AccountOut, status_code=status.HTTP_201_CREATED)
-def create_account(
-    body: AccountIn, service: AdminServiceDep, _admin: AdminSubject
-) -> AccountOut:
+def create_account(body: AccountIn, service: AdminServiceDep, _admin: AdminSubject) -> AccountOut:
     """Create a login. Note what this route cannot do: bind a guardian.
 
     Creation and binding are deliberately two calls. A bulk parent import that runs only
@@ -58,16 +57,12 @@ def bind_guardian(
     Audited as its own event type, because "who decided this parent is that guardian" is
     the first question anyone asks after a records leak.
     """
-    bound = service.bind_guardian(
-        username=username, guardian_external_id=body.guardian_external_id
-    )
+    bound = service.bind_guardian(username=username, guardian_external_id=body.guardian_external_id)
     return _out(bound)
 
 
 @router.delete("/accounts/{username}/guardian-binding", response_model=AccountOut)
-def unbind_guardian(
-    username: str, service: AdminServiceDep, _admin: AdminSubject
-) -> AccountOut:
+def unbind_guardian(username: str, service: AdminServiceDep, _admin: AdminSubject) -> AccountOut:
     """Remove a binding — the custody-change path.
 
     Takes effect for new access tokens immediately, for existing ones within their
@@ -127,9 +122,7 @@ def update_account(
 
 
 @router.delete("/accounts/{username}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_account(
-    username: str, service: AdminServiceDep, _admin: AdminSubject
-) -> Response:
+def delete_account(username: str, service: AdminServiceDep, _admin: AdminSubject) -> Response:
     """Delete an account and revoke its sessions.
 
     Refused for the last active administrator: losing every admin means nobody can bind a

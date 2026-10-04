@@ -15,6 +15,7 @@ being true.
 Revision ID: 0006
 Revises: 0005
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa

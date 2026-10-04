@@ -26,6 +26,7 @@ wrong rather than merely incorrect, which is the difference between guessing a c
 mapping the flow. The `code` in the body still tells a legitimate page what to say, because
 a legitimate page holds the poll secret it was given.
 """
+
 from __future__ import annotations
 
 import logging
@@ -132,9 +133,7 @@ def install(app: FastAPI) -> None:
         """
         detail = error.detail
         if isinstance(detail, dict) and "code" in detail:
-            return JSONResponse(
-                status_code=error.status_code, content={"detail": detail}
-            )
+            return JSONResponse(status_code=error.status_code, content={"detail": detail})
         return JSONResponse(
             status_code=error.status_code,
             content=_body(_code_for_status(error.status_code), str(detail or "")),

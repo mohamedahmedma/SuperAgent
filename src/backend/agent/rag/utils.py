@@ -1,20 +1,21 @@
-from collections import defaultdict
-import math
-from typing import List, Tuple, Dict, Any, Literal, Optional
-import logging
-import os
 import json
+import logging
+import math
+import os
+from collections import defaultdict
+from typing import Any, Dict, List, Literal, Optional, Tuple
+
 import requests
 from langsmith import traceable
+from pydantic import Field
 
-from backend.indexing.embedding import embed_query
 from backend.agent.rag.rerank_assessor import CrossEncoderProvider
 from backend.env import env_bool, env_float, env_int, env_value
-from backend.agent.profiles import get_profile
-from backend.agent.prompts import resolve as resolve_prompt
+from backend.indexing.embedding import embed_query
+from backend.profiles import get_profile
+from backend.prompts import resolve as resolve_prompt
 from backend.text_matching import search_key
 from backend.text_normalization import normalize_query
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +34,10 @@ def _optional_env(name: str) -> Optional[str]:
     return value
 
 
-
 # Retrieval tuning defaults come from the active domain profile; the environment
 # readers below still take precedence, so the effective order is
 # env > profile > schema default. The profile object itself is env-overlaid by
-# backend/agent/profiles/registry.py, so both paths agree on the final value.
+# backend/profiles/registry.py, so both paths agree on the final value.
 _PROFILE = get_profile()
 _RETRIEVAL = _PROFILE.retrieval
 
@@ -82,9 +82,7 @@ RERANK_LOCAL_BATCH_SIZE = env_int(
 )
 # How many fused candidates the cross-encoder scores — the whole cost of reranking, and
 # the ceiling on what it can rescue. See RetrievalConfig.
-RERANK_LOCAL_TOP_N = env_int(
-    "RERANK_LOCAL_TOP_N", _RETRIEVAL.rerank_local_top_n, minimum=0
-)
+RERANK_LOCAL_TOP_N = env_int("RERANK_LOCAL_TOP_N", _RETRIEVAL.rerank_local_top_n, minimum=0)
 
 # An explicit candidate pool size can come from either layer, and the retrieval trace
 # reports WHICH — "env" and "profile" are different operational stories when someone
@@ -142,6 +140,7 @@ RETRIEVAL_TRACE_FIELDS = (
     "retrieval_cache",
 )
 
+
 def _milvus():
     """The vector store, from the process container.
 
@@ -179,7 +178,12 @@ def retrieval_settings() -> dict:
     import backend.text_normalization as text_normalization
 
     code = hashlib.sha256()
-    for module in (__file__, milvus_client.__file__, text_matching.__file__, text_normalization.__file__):
+    for module in (
+        __file__,
+        milvus_client.__file__,
+        text_matching.__file__,
+        text_normalization.__file__,
+    ):
         code.update(Path(module).read_bytes())
     return {
         "profile": _RETRIEVAL.model_dump(mode="json"),
@@ -191,11 +195,24 @@ def retrieval_settings() -> dict:
             "auto_merge": [AUTO_MERGE_ENABLED, AUTO_MERGE_THRESHOLD, AUTO_MERGE_FIGURE_THRESHOLD],
             "evidence_window_chars": EVIDENCE_WINDOW_CHARS,
             "max_chunks_per_asset": MAX_CHUNKS_PER_ASSET,
-            "rerank": [RERANK_ENABLED, RERANK_MODEL, RERANK_BINDING_HOST, RERANK_DOC_CHAR_LIMIT, RERANK_MIN_SCORE],
+            "rerank": [
+                RERANK_ENABLED,
+                RERANK_MODEL,
+                RERANK_BINDING_HOST,
+                RERANK_DOC_CHAR_LIMIT,
+                RERANK_MIN_SCORE,
+            ],
             "rerank_local": [RERANK_LOCAL_ENABLED, RERANK_LOCAL_MODEL, RERANK_LOCAL_TOP_N],
         },
-        "embedding": [os.getenv(name) for name in (
-            "EMBEDDING_BACKEND", "EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "DENSE_EMBEDDING_DIM")],
+        "embedding": [
+            os.getenv(name)
+            for name in (
+                "EMBEDDING_BACKEND",
+                "EMBEDDING_BASE_URL",
+                "EMBEDDING_MODEL",
+                "DENSE_EMBEDDING_DIM",
+            )
+        ],
         "collection": os.getenv("MILVUS_COLLECTION", "embeddings_collection"),
         "code": code.hexdigest(),
     }
@@ -211,7 +228,6 @@ def _parent_chunks():
     from backend.composition import default_services
 
     return default_services().parent_chunks
-
 
 
 def resolve_candidate_k(top_k: int) -> Tuple[int, Dict[str, Any]]:
@@ -239,7 +255,9 @@ def resolve_candidate_k(top_k: int) -> Tuple[int, Dict[str, Any]]:
 
 def retrieval_trace_fields(meta: Dict[str, Any]) -> Dict[str, Any]:
     """Extract the retrieval fields that should be written into rag_trace from the retrieve meta."""
-    return {key: meta[key] for key in RETRIEVAL_TRACE_FIELDS if key in meta and meta[key] is not None}
+    return {
+        key: meta[key] for key in RETRIEVAL_TRACE_FIELDS if key in meta and meta[key] is not None
+    }
 
 
 def _get_rerank_endpoint() -> str:
@@ -412,9 +430,7 @@ def _parent_window(parent_text: str, children: List[dict], budget: int) -> Optio
         return text
 
     spans = [
-        span
-        for child in children
-        for span in _match_spans(text, child.get("text", ""), budget)
+        span for child in children for span in _match_spans(text, child.get("text", ""), budget)
     ]
     if not spans:
         return None
@@ -427,7 +443,8 @@ def _parent_window(parent_text: str, children: List[dict], budget: int) -> Optio
         cursor += len(line) + 1
 
     core = [
-        index for index, (start, end) in enumerate(bounds)
+        index
+        for index, (start, end) in enumerate(bounds)
         if any(start < span_end and end > span_start for span_start, span_end in spans)
     ]
     if not core:
@@ -441,7 +458,7 @@ def _parent_window(parent_text: str, children: List[dict], budget: int) -> Optio
         # candidate list, so a second match that sits before it is not cut away. A window
         # of whole lines is not a bound on its own, because one line can be longer than
         # the whole window.
-        return text[min(start for start, _ in spans):][:budget]
+        return text[min(start for start, _ in spans) :][:budget]
 
     before, after = first - 1, last + 1
     while True:
@@ -456,7 +473,7 @@ def _parent_window(parent_text: str, children: List[dict], budget: int) -> Optio
             grew = True
         if not grew:
             break
-    return "\n".join(lines[before + 1:after])
+    return "\n".join(lines[before + 1 : after])
 
 
 def _merge_to_parent_level(
@@ -573,12 +590,14 @@ def _auto_merge_candidates(docs: List[dict]) -> Tuple[List[dict], Dict[str, Any]
     )
 
     replaced_count = merged_count_l3_l2 + merged_count_l2_l1
-    meta.update({
-        "auto_merge_applied": replaced_count > 0,
-        "auto_merge_replaced_chunks": replaced_count,
-        "auto_merge_steps": int(merged_count_l3_l2 > 0) + int(merged_count_l2_l1 > 0),
-        "post_merge_candidate_count": len(merged_docs),
-    })
+    meta.update(
+        {
+            "auto_merge_applied": replaced_count > 0,
+            "auto_merge_replaced_chunks": replaced_count,
+            "auto_merge_steps": int(merged_count_l3_l2 > 0) + int(merged_count_l2_l1 > 0),
+            "post_merge_candidate_count": len(merged_docs),
+        }
+    )
     return merged_docs, meta
 
 
@@ -687,7 +706,9 @@ def _local_rerank(query: str, docs: List[dict]) -> Optional[List[dict]]:
 
 
 @traceable(name="rerank_documents", run_type="tool")
-def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[dict], Dict[str, Any]]:
+def _rerank_documents(
+    query: str, docs: List[dict], top_k: int
+) -> Tuple[List[dict], Dict[str, Any]]:
     """The candidates in relevance order. ORDERED, not cut.
 
     The cut moved to `_finalize_retrieval`, because the per-image cap has to be applied
@@ -716,11 +737,13 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
     if RERANK_LOCAL_ENABLED and not RERANK_ENABLED:
         scored = _local_rerank(query, docs_with_rank)
         if scored is not None:
-            meta.update({
-                "rerank_applied": True,
-                "rerank_model": RERANK_LOCAL_MODEL,
-                "rerank_endpoint": f"local:{RERANK_LOCAL_DEVICE}",
-            })
+            meta.update(
+                {
+                    "rerank_applied": True,
+                    "rerank_model": RERANK_LOCAL_MODEL,
+                    "rerank_endpoint": f"local:{RERANK_LOCAL_DEVICE}",
+                }
+            )
             return scored, meta
         meta["rerank_error"] = "local_cross_encoder_unavailable"
         return _sort_by_rank_score(docs_with_rank), meta
@@ -798,7 +821,7 @@ class RewritePlan(StructuredOutput):
     )
 
 
-# Prompt text lives in the active profile (backend/agent/profiles/definitions/*.yaml) so a
+# Prompt text lives in the active profile (backend/profiles/definitions/*.yaml) so a
 # domain can retune retrieval wording without a code change.
 REWRITE_PROMPT = _PROFILE.rag.rewrite_prompt
 
@@ -835,7 +858,12 @@ def rewrite_query_once(query: str) -> Optional[dict]:
 
     try:
         result = model.with_structured_output(RewritePlan).invoke(
-            [{"role": "user", "content": resolve_prompt(REWRITE_PROMPT, "rag/rewrite.j2", query=query)}]
+            [
+                {
+                    "role": "user",
+                    "content": resolve_prompt(REWRITE_PROMPT, "rag/rewrite.j2", query=query),
+                }
+            ]
         )
     except Exception:
         logger.exception("Query-rewrite planning failed; continuing without a rewrite")
@@ -897,7 +925,8 @@ def _finalize_retrieval(
         logger.warning(
             "%d retrieved chunk(s) exceed evidence_window_chars=%d (largest %d): the "
             "index predates figure splitting, so reindex the affected documents",
-            len(oversized), EVIDENCE_WINDOW_CHARS,
+            len(oversized),
+            EVIDENCE_WINDOW_CHARS,
             max(len(d.get("text") or "") for d in oversized),
         )
     meta = {
