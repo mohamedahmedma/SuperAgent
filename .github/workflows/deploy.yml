@@ -38,11 +38,32 @@ jobs:
       services: ${{ steps.detect.outputs.services }}
     steps:
       - uses: actions/checkout@v4
-        with: {fetch-depth: 2}
+        with: {fetch-depth: 0}
       - id: detect
         shell: bash
         run: |
-          changed="$(git diff --name-only '${{ github.event.before }}' "$GITHUB_SHA" 2>/dev/null || git ls-files)"
+          # The baseline is the last commit that actually FINISHED a successful deploy -
+          # a tag the `mark-deployed` job at the end of this workflow moves, and only once
+          # `deploy` (every step of it, including the external verification at the end)
+          # has succeeded. `github.event.before` (the branch tip before this push) is not
+          # that: it still advances when a push's own CI or CD failed, so the next push's
+          # diff silently treats the failed push's changes as already deployed and never
+          # rebuilds the services they touched.
+          #
+          # That is what happened on 2026-10-02: a push moved every backend/identity/
+          # records/sis file under src/, but failed Stage 1 CI, so Stage 3 never ran for
+          # it. The next push touched only frontend files, diffed from that failed push's
+          # SHA as `before`, and correctly saw no backend/identity/records/sis change - so
+          # those services kept running their pre-move images, whose `alembic.ini` was not
+          # at the path this workflow now runs it from, and the release failed migrating.
+          #
+          # A missing or unreachable tag (first run ever, or a history this checkout does
+          # not have) falls back to `github.event.before` exactly as before; a diff against
+          # that failing in turn falls back to `git ls-files` - every file, every service
+          # rebuilt - which is the fail-open behaviour this script already had.
+          git fetch origin 'refs/tags/production-deployed:refs/tags/production-deployed' 2>/dev/null || true
+          baseline="$(git rev-parse --verify -q production-deployed || echo '${{ github.event.before }}')"
+          changed="$(git diff --name-only "$baseline" "$GITHUB_SHA" 2>/dev/null || git ls-files)"
           all=false; backend=false; frontend=false; identity=false; records=false; sis=false
           while IFS= read -r file; do
             case "$file" in
@@ -506,3 +527,30 @@ jobs:
             fi
           done
           [ "$fail" -eq 0 ]
+
+  mark-deployed:
+    name: Stage 4 - Record this as the last successful deploy
+    needs: deploy
+    # The default: a job is skipped if any job it `needs` failed or was skipped. So this
+    # runs only once `deploy` - every step of it, including the external verification
+    # above - has actually succeeded.
+    runs-on: ubuntu-latest
+    # A job's `permissions:` REPLACES the workflow-level block above rather than adding
+    # to it. Kept in its own job, and only for the few seconds this takes: a write-capable
+    # token sitting in `deploy`'s workspace for the whole release (ssh, curl, apt-get)
+    # would widen what a compromise of any one of those steps could reach, for no benefit
+    # over giving it only to the one step that actually needs it.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      # `concurrency: {group: production}` above serializes this workflow, so two runs
+      # never race to move the same tag. `--force` because the tag is meant to move, not
+      # accumulate history: "Detect changed services" only ever reads where it points
+      # today. A failure here is this job's own red X, separate from "Stage 3 - Deploy
+      # production"'s - so it cannot be read as the release itself having failed or been
+      # rolled back, which it was not.
+      - name: Mark this commit as the last successful production deploy
+        run: |
+          git tag -f production-deployed "$GITHUB_SHA"
+          git push origin production-deployed --force
