@@ -21,9 +21,10 @@
     // Kept out of the source tree. `noEmit` stops the .js output but NOT this file,
     // which `tsc --build` writes regardless.
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
-    "baseUrl": ".",
+    // No "baseUrl": TypeScript 5 deprecates it, and resolves "paths" relative to this
+    // file's own directory once it is gone — the same place "." pointed to anyway.
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"],
