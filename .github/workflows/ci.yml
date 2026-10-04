@@ -59,8 +59,13 @@ jobs:
       # check below passes from an environment holding nothing but this group.
       - run: uv sync --locked --only-group dev
       # --no-sync, or `uv run` would go back and install the full default environment.
-      - run: uv run --no-sync ruff check src tests scripts conftest.py
-      - run: uv run --no-sync ruff format --check src tests scripts conftest.py
+      #
+      # `scripts/` is deliberately untracked (.gitignore) and so does not exist in this
+      # checkout - it held nothing a clean clone needs to run or test. Naming it here ran
+      # ruff against a path that is only ever present on a developer's own machine, which
+      # passed locally and failed every CI run with "No such file or directory".
+      - run: uv run --no-sync ruff check src tests conftest.py
+      - run: uv run --no-sync ruff format --check src tests conftest.py
       # Nothing is installed, so the packages are found through PYTHONPATH here too.
       - run: uv run --no-sync lint-imports
         env: {PYTHONPATH: src}
