@@ -35,9 +35,6 @@ class PairUploadJobTests(unittest.TestCase):
             unit_of_work=postgres_schema(self, DocumentPair).unit_of_work
         )
 
-        import backend.api.routes.documents as documents
-
-        self.documents = documents
         self.loader = MagicMock()
         self.writer = MagicMock()
         self.parents = MagicMock()
@@ -45,8 +42,8 @@ class PairUploadJobTests(unittest.TestCase):
         self.remover.remove.return_value = 0
         self.jobs = MagicMock()
 
-        # Every collaborator the job uses, named. Nothing is patched: the job is handed
-        # this container and can reach nothing else.
+        # Every collaborator the job uses, named. Nothing is patched: the ingestion service is
+        # built from this container and can reach nothing else.
         self.services = Services(
             document_loader=self.loader,
             milvus_writer=self.writer,
@@ -57,7 +54,7 @@ class PairUploadJobTests(unittest.TestCase):
         )
 
     def _run(self, sides, pair_id="", title="Fees"):
-        self.documents._process_pair_upload_job(self.services, "job1", pair_id, title, sides)
+        self.services.document_ingestion.ingest_pair("job1", pair_id, title, sides)
 
     def _failure(self):
         self.assertTrue(self.jobs.fail_job.called, "the job was expected to fail")

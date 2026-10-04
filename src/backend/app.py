@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from backend.api.errors import install_error_handlers
 from backend.api.router import router
 from backend.composition import Services, set_default_services
 from backend.infra.database import log_database_status, verify_connectivity
@@ -205,6 +206,8 @@ def create_app(services: Services | None = None) -> FastAPI:
                 response.headers["Expires"] = "0"
             return response
 
+    # Services raise the errors in backend.domain.errors; this is where each becomes a status.
+    install_error_handlers(app)
     app.include_router(router)
 
     if serve_frontend:

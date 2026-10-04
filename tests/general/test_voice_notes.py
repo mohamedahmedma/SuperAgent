@@ -256,11 +256,13 @@ class VoiceNoteRouteTests(_VoiceNoteTestCase):
         self.client = self._client_for("parent")
 
     def _client_for(self, username: str) -> TestClient:
+        from backend.api.errors import install_error_handlers
         from backend.api.routes.attachments import router as attachments_router
         from backend.api.routes.sessions import router as sessions_router
 
         app = FastAPI()
         app.state.services = self.services
+        install_error_handlers(app)
         app.include_router(attachments_router)
         app.include_router(sessions_router)
         app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
@@ -304,13 +306,22 @@ class VoiceNoteRouteTests(_VoiceNoteTestCase):
         self.assertEqual(404, self.client.get("/chat/attachments/ghost").status_code)
 
     def test_a_refused_recording_names_why(self):
-        self.assertEqual(415, self._upload(content_type="video/mp4").status_code)
-        self.assertEqual(400, self._upload(data=b"").status_code)
+        """In the object form the recorder reads its `code` out of, not the string form every
+        other error takes - through the real route and the real error handler."""
+
+        def refusal(response, status, code):
+            self.assertEqual(status, response.status_code, response.text)
+            detail = response.json()["detail"]
+            self.assertEqual(code, detail["code"])
+            self.assertTrue(detail["message"])
+
+        refusal(self._upload(content_type="video/mp4"), 415, VoiceNoteRejected.UNSUPPORTED_TYPE)
+        refusal(self._upload(data=b""), 400, VoiceNoteRejected.EMPTY)
 
         self.services = Services(
             attachments=self._service(self.transcriber, max_bytes=16), conversations=self.storage
         )
-        self.assertEqual(413, self._upload(self._client_for("parent")).status_code)
+        refusal(self._upload(self._client_for("parent")), 413, VoiceNoteRejected.TOO_LARGE)
 
     def test_a_reopened_conversation_carries_its_voice_notes(self):
         note = self._upload().json()

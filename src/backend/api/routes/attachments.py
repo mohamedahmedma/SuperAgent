@@ -19,13 +19,13 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 
-from backend.agent.chat.attachments import VoiceNoteRejected
 from backend.agent.schemas import AttachmentInfo
 from backend.api.deps import get_services
 from backend.application.ports.repositories import AttachmentRecord
 from backend.composition import Services
+from backend.domain.errors import Forbidden, NotFound
 from backend.infra.auth import AuthenticatedUser, get_current_user
 
 logger = logging.getLogger(__name__)
@@ -35,12 +35,6 @@ router = APIRouter(tags=["attachments"])
 #: Where a note's bytes are fetched from. One spelling, used by both routes below and by
 #: the sessions page that restores a conversation's notes.
 ATTACHMENT_PATH = "/chat/attachments/{attachment_id}"
-
-#: The HTTP status each refusal maps to. 413 and 415 are what they say; the rest is 400.
-_REJECTION_STATUS = {
-    VoiceNoteRejected.TOO_LARGE: 413,
-    VoiceNoteRejected.UNSUPPORTED_TYPE: 415,
-}
 
 
 def attachment_info(record: AttachmentRecord) -> AttachmentInfo:
@@ -74,6 +68,8 @@ async def upload_attachment(
     """
     limit = services.attachments.limits.max_bytes
     data = await file.read(limit + 1)
+    # A recording refused as too large, too long or of the wrong type raises
+    # `VoiceNoteRejected`, which `backend/api/errors.py` answers with its code.
     try:
         record = await asyncio.to_thread(
             services.attachments.store_voice_note,
@@ -82,17 +78,10 @@ async def upload_attachment(
             file.content_type or "",
             duration_ms,
         )
-    except VoiceNoteRejected as exc:
-        raise HTTPException(
-            status_code=_REJECTION_STATUS.get(exc.reason, 400),
-            detail={"code": exc.reason, "message": str(exc)},
-        ) from None
     except LookupError:
         # Authentication creates the row this needs, so this is a caller the backend has
         # never served — refused as such rather than reported as a server fault.
-        raise HTTPException(
-            status_code=403, detail="This account cannot send attachments."
-        ) from None
+        raise Forbidden("This account cannot send attachments.") from None
     return attachment_info(record)
 
 
@@ -111,7 +100,7 @@ async def get_attachment_bytes(
     """
     record = await asyncio.to_thread(services.attachments.get, current_user.username, attachment_id)
     if record is None:
-        raise HTTPException(status_code=404, detail="Attachment not found")
+        raise NotFound("Attachment not found")
 
     etag = f'"{record.sha256}"'
     if request.headers.get("if-none-match") == etag:
@@ -121,9 +110,7 @@ async def get_attachment_bytes(
         data = await asyncio.to_thread(services.attachments.read_bytes, record)
     except FileNotFoundError:
         logger.error("Blob missing for attachment %s (%s)", attachment_id, record.storage_uri)
-        raise HTTPException(
-            status_code=404, detail="The recording is no longer available"
-        ) from None
+        raise NotFound("The recording is no longer available") from None
 
     return Response(
         content=data,

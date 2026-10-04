@@ -2,7 +2,7 @@
 
 One base dependency reads the container off the application, and one small provider per
 service unwraps it. Routes then declare what they need in their signature —
-`conversations: ConversationStorage = Depends(conversation_storage)` — instead of
+`sessions: SessionService = Depends(session_service)` — instead of
 importing a module-level instance, which is what makes a route testable with
 `app.dependency_overrides` and what keeps `backend/composition.py` the only file that
 knows how anything is built.
@@ -19,9 +19,12 @@ from fastapi import Depends, Request
 from backend.composition import Services, default_services
 
 if TYPE_CHECKING:
-    from backend.agent.chat.storage import ConversationStorage
-    from backend.indexing.pair_store import DocumentPairService
-    from backend.jobs.upload_jobs import IngestJobTracker
+    from backend.application.services import (
+        DocumentCatalogue,
+        DocumentIngestion,
+        DocumentRemoval,
+        SessionService,
+    )
 
 
 def get_services(request: Request) -> Services:
@@ -35,26 +38,26 @@ def get_services(request: Request) -> Services:
     return services if services is not None else default_services()
 
 
-def conversation_storage(services: Services = Depends(get_services)) -> ConversationStorage:
-    return services.conversations
+def session_service(services: Services = Depends(get_services)) -> SessionService:
+    return services.sessions
 
 
-def document_pair_service(services: Services = Depends(get_services)) -> DocumentPairService:
-    return services.document_pairs
+def document_catalogue(services: Services = Depends(get_services)) -> DocumentCatalogue:
+    return services.document_catalogue
 
 
-def upload_job_tracker(services: Services = Depends(get_services)) -> IngestJobTracker:
-    return services.upload_jobs
+def document_ingestion(services: Services = Depends(get_services)) -> DocumentIngestion:
+    return services.document_ingestion
 
 
-def delete_job_tracker(services: Services = Depends(get_services)) -> IngestJobTracker:
-    return services.delete_jobs
+def document_removal(services: Services = Depends(get_services)) -> DocumentRemoval:
+    return services.document_removal
 
 
 __all__ = [
-    "conversation_storage",
-    "delete_job_tracker",
-    "document_pair_service",
+    "document_catalogue",
+    "document_ingestion",
+    "document_removal",
     "get_services",
-    "upload_job_tracker",
+    "session_service",
 ]
