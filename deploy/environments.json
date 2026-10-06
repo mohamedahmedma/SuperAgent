@@ -1,0 +1,45 @@
+{
+  "dev": {
+    "branch": "develop",
+    "public_ip": "13.140.153.131",
+    "port_offset": 10000,
+    "domains": {
+      "superagent": "dev-superagent-b43d422afead4b89c57c5034.aurexis.cc",
+      "sis": "dev-sis-b43d422afead4b89c57c5034.aurexis.cc",
+      "api": "dev-api-b43d422afead4b89c57c5034.aurexis.cc",
+      "auth": "dev-auth-b43d422afead4b89c57c5034.aurexis.cc",
+      "records": "dev-records-b43d422afead4b89c57c5034.aurexis.cc",
+      "attu": "dev-attu-b43d422afead4b89c57c5034.aurexis.cc",
+      "minio": "dev-minio-b43d422afead4b89c57c5034.aurexis.cc",
+      "s3": "dev-s3-b43d422afead4b89c57c5034.aurexis.cc",
+      "milvus": "dev-milvus-b43d422afead4b89c57c5034.aurexis.cc",
+      "etcd": "dev-etcd-b43d422afead4b89c57c5034.aurexis.cc"
+    }
+  },
+  "test": {
+    "branch": "test",
+    "public_ip": "13.140.153.131",
+    "port_offset": 20000,
+    "domains": {
+      "superagent": "test-superagent-2c70f5816cf684210e323910.aurexis.cc",
+      "sis": "test-sis-2c70f5816cf684210e323910.aurexis.cc",
+      "api": "test-api-2c70f5816cf684210e323910.aurexis.cc",
+      "auth": "test-auth-2c70f5816cf684210e323910.aurexis.cc",
+      "records": "test-records-2c70f5816cf684210e323910.aurexis.cc",
+      "attu": "test-attu-2c70f5816cf684210e323910.aurexis.cc",
+      "minio": "test-minio-2c70f5816cf684210e323910.aurexis.cc",
+      "s3": "test-s3-2c70f5816cf684210e323910.aurexis.cc",
+      "milvus": "test-milvus-2c70f5816cf684210e323910.aurexis.cc",
+      "etcd": "test-etcd-2c70f5816cf684210e323910.aurexis.cc"
+    }
+  },
+  "production": {
+    "branch": "main",
+    "public_ip": "13.140.153.131",
+    "port_offset": 0,
+    "domains": {
+      "superagent": "superagent.aurexis.cc",
+      "sis": "sis.aurexis.cc"
+    }
+  }
+}

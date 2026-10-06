@@ -25,6 +25,7 @@ hand-written. It is in `deploy/nginx/` now, and so is covered here.
 """
 
 import io
+import json
 import re
 import unittest
 from pathlib import Path
@@ -50,14 +51,25 @@ UPLOAD_UPSTREAMS = (
     "backend:8000",  # frontend container -> backend, over the compose network
     "127.0.0.1:8000",  # host nginx -> backend
     "127.0.0.1:3000",  # host nginx -> frontend container
+    "127.0.0.1:18000",  # dev backend
+    "127.0.0.1:13000",  # dev frontend
+    "127.0.0.1:28000",  # test backend
+    "127.0.0.1:23000",  # test frontend
 )
 
 #: Configs that must always be on that path. Named so a rename cannot quietly empty the
 #: discovery below and leave this file asserting nothing; new vhosts need no edit here.
 REQUIRED_ON_PATH = (
     "src/frontend/nginx.conf",
-    "deploy/nginx/api.aurexis.cc.conf",
-    "deploy/nginx/superagent.aurexis.cc.conf",
+    "deploy/nginx/production/superagent.aurexis.cc.conf",
+    *(
+        f"deploy/nginx/{environment}/{profile['domains'][service]}.conf"
+        for environment, profile in json.loads(
+            (REPO_ROOT / "deploy/environments.json").read_text(encoding="utf-8")
+        ).items()
+        if environment != "production"
+        for service in ("superagent", "api")
+    ),
 )
 
 _SIZE = re.compile(r"client_max_body_size\s+(\d+)\s*([kmg]?)\s*;", re.IGNORECASE)
@@ -72,7 +84,7 @@ def _nginx_configs() -> list[Path]:
     runtime `.conf` files, which are not nginx's and share only the extension.
     """
     found = [REPO_ROOT / "src" / "frontend" / "nginx.conf"]
-    found += sorted((REPO_ROOT / "deploy" / "nginx").glob("*.conf"))
+    found += sorted((REPO_ROOT / "deploy" / "nginx").rglob("*.conf"))
     return [path for path in found if path.is_file()]
 
 

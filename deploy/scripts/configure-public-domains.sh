@@ -1,20 +1,14 @@
 #!/usr/bin/env bash
 #
-# Publish the identity and backend services on their public domains.
+# Publish this estate's repository-managed domains and issue their certificates.
 #
 # Runs on the production VPS, from the deployment directory, after the compose stack is
 # up. It is deliberately re-runnable: every step checks the state it wants before acting,
 # so a second run installs nothing, requests no certificate, and reloads nothing.
 #
-# The services listen on loopback only. Host nginx is the sole public surface, and this
-# script owns three virtual hosts — auth.aurexis.cc, api.aurexis.cc and
-# superagent.aurexis.cc. Any other vhost on the box is left alone.
-#
-# superagent.aurexis.cc joined them on 2026-09-12, because it is the hop a knowledge-base
-# upload actually crosses and, being hand-written, it still carried nginx's 1m default and
-# answered 413. Note that it fronts SIS as well as the chat UI, so this script now owns the
-# registrar console's public routing too — deploy/nginx/superagent.aurexis.cc.conf
-# reproduces those locations and must keep them.
+# Topology comes from .deployment.env. dev/test publish all application APIs and
+# management consoles; production publishes only SuperAgent and SIS. Other estates'
+# virtual hosts are not owned by this run and cannot be disabled.
 #
 # Order matters, and the reason is that nginx refuses to load a server block naming a
 # certificate file that does not exist. So a domain without a certificate is first
@@ -38,7 +32,8 @@ DEPLOY_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # user with sudo rights.
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 
-DOMAINS=(auth.aurexis.cc api.aurexis.cc superagent.aurexis.cc)
+source "$SCRIPT_DIR/load-deployment-profile.sh"
+NGINX_SRC="$NGINX_SRC/$DEPLOY_ENVIRONMENT"
 
 LAYOUT=""
 BACKUP_DIR=""
@@ -133,19 +128,13 @@ wait_for_local() {
 
 check_local_services() {
   log "checking services on loopback"
-  wait_for_local "http://127.0.0.1:8200/docs" 200 24 \
-    || fail "identity is not serving /docs on 127.0.0.1:8200"
-  wait_for_local "http://127.0.0.1:8000/health" 200 24 \
-    || fail "backend is not serving /health on 127.0.0.1:8000"
-  # /ready reports 503 until the embedding model is built, which on a cold hf_cache is a
-  # download rather than a fault. Wait it out, then print the body, which names the
-  # dependency that stayed down.
-  if ! wait_for_local "http://127.0.0.1:8000/ready" 200 60; then
-    log "readiness body:"
-    curl -s --max-time 10 "http://127.0.0.1:8000/ready" || true
-    echo
-    fail "backend did not become ready on 127.0.0.1:8000/ready"
-  fi
+  local url
+  for url in $LOCAL_CHECK_URLS; do
+    wait_for_local "$url" 200 24 || fail "$url is not available"
+  done
+  wait_for_local "http://127.0.0.1:$BACKEND_HOST_PORT/ready" 200 120 \
+    || fail "backend readiness did not succeed"
+
 }
 
 # --------------------------------------------------------------------------------------
@@ -288,11 +277,13 @@ disable_conflicts() {
       | sed 's/^[[:space:]]*server_name[[:space:]]*//' \
       | tr -s '[:space:]' '\n' | grep -v '^$' | sort -u)"
     printf '%s\n' "$names" | grep -Fqx "$domain" || continue
-    if printf '%s\n' "$names" | grep -qvE '^(auth|api|superagent)\.aurexis\.cc$'; then
-      fail "$f also serves [$(printf '%s' "$names" | tr '\n' ' ')] and claims $domain; resolve this by hand rather than have a deployment disable someone else's vhost"
-    fi
+    local name
+    while IFS= read -r name; do
+      is_managed_domain "$name" || fail "$f also serves unmanaged domain $name"
+    done <<< "$names"
     log "disabling conflicting vhost $f (backed up)"
-    $SUDO cp -a "$f" "$BACKUP_DIR/$(basename "$f").conflict"
+    $SUDO cp -L "$f" "$BACKUP_DIR/$(basename "$f").conflict"
+    printf '%s\t%s\n' "$f" "$BACKUP_DIR/$(basename "$f").conflict" >> "$BACKUP_DIR/conflicts.tsv"
     $SUDO rm -f "$f"
   done
 }
@@ -301,7 +292,7 @@ backup_existing() {
   local domain="$1" c
   c="$(conf_path "$domain")"
   if [ -e "$c" ]; then
-    $SUDO cp -a "$c" "$BACKUP_DIR/$(basename "$c")"
+    $SUDO cp -L "$c" "$BACKUP_DIR/$(basename "$c")"
   fi
 }
 
@@ -318,7 +309,7 @@ install_conf() {
 restore_backup() {
   log "restoring the previous nginx configuration"
   local domain c e b
-  for domain in "${DOMAINS[@]}"; do
+  for domain in "${DOMAINS[@]}" "${RETIRED[@]}"; do
     c="$(conf_path "$domain")"
     e="$(enabled_path "$domain")"
     b="$BACKUP_DIR/$(basename "$c")"
@@ -331,6 +322,28 @@ restore_backup() {
       fi
     fi
   done
+  if [ -f "$BACKUP_DIR/conflicts.tsv" ]; then
+    local original saved
+    while IFS=$'\t' read -r original saved; do
+      $SUDO install -m 644 "$saved" "$original"
+    done < "$BACKUP_DIR/conflicts.tsv"
+  fi
+  if [ -f "$BACKUP_DIR/shared-map.conf" ]; then
+    $SUDO install -m 644 "$BACKUP_DIR/shared-map.conf" /etc/nginx/conf.d/00-aurexis-websocket.conf
+  else
+    $SUDO rm -f /etc/nginx/conf.d/00-aurexis-websocket.conf
+  fi
+}
+
+finish_domains() {
+  local result="$?"
+  trap - EXIT
+  if [ "$result" -ne 0 ]; then
+    restore_backup || true
+    if $SUDO nginx -t; then $SUDO nginx -s reload || true; fi
+  fi
+  rm -rf "$DOMAIN_CONFIG_TMP"
+  exit "$result"
 }
 
 # Validate, then reload. A configuration that does not pass `nginx -t` is never reloaded,
@@ -376,15 +389,35 @@ check_public() {
 }
 
 verify_public() {
-  log "verifying public endpoints"
-  check_public "https://auth.aurexis.cc/docs" 200  || fail "https://auth.aurexis.cc/docs is not serving 200"
-  check_public "https://api.aurexis.cc/docs" 200   || fail "https://api.aurexis.cc/docs is not serving 200"
-  check_public "https://api.aurexis.cc/health" 200 || fail "https://api.aurexis.cc/health is not serving 200"
-  check_public "https://api.aurexis.cc/ready" 200  || fail "https://api.aurexis.cc/ready is not serving 200"
-  # The UI's own origin, and the SIS health endpoint this vhost also publishes — the two
-  # halves of what it serves, so a rewrite that dropped either is caught before the run ends.
-  check_public "https://superagent.aurexis.cc/" 200 || fail "https://superagent.aurexis.cc/ is not serving the UI"
-  check_public "https://superagent.aurexis.cc/health" 200 || fail "https://superagent.aurexis.cc/health is not serving SIS health"
+  bash "$SCRIPT_DIR/verify-public-endpoints.sh" || fail "public endpoint verification failed"
+}
+
+retire_production_hosts() {
+  [ "$DEPLOY_ENVIRONMENT" = production ] || return 0
+  local domain certificate_domain
+  for domain in "${RETIRED[@]}"; do
+    disable_conflicts "$domain"
+    certificate_domain="$SUPERAGENT_DOMAIN"
+    if [ -s "/etc/letsencrypt/live/$domain/fullchain.pem" ]; then certificate_domain="$domain"; fi
+    # Preserve their certificates for rollback, but stop serving application routes.
+    cat > "$DOMAIN_CONFIG_TMP/$domain.conf" <<DENY
+server {
+    listen 80;
+    server_name $domain;
+    location ^~ /.well-known/acme-challenge/ { root $WEBROOT; }
+    location / { return 404; }
+}
+server {
+    listen 443 ssl;
+    server_name $domain;
+    ssl_certificate /etc/letsencrypt/live/$certificate_domain/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$certificate_domain/privkey.pem;
+    return 404;
+}
+DENY
+    install_conf "$domain" "$DOMAIN_CONFIG_TMP/$domain.conf"
+  done
+  nginx_apply
 }
 
 # --------------------------------------------------------------------------------------
@@ -405,25 +438,43 @@ main() {
   require_tools
   detect_layout
 
-  BACKUP_DIR="$BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)"
+  BACKUP_DIR="$BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-$DEPLOY_ENVIRONMENT-$$"
   $SUDO install -d -m 700 "$BACKUP_DIR"
   log "backups for this run: $BACKUP_DIR"
 
+  # dev and test can deploy concurrently; their edits to host Nginx must be serialized.
+  exec 9>/var/lock/aurexis-nginx.lock
+  flock -w 900 9 || fail "another environment is updating Nginx"
+
   check_local_services
   check_dns "$expected_ip"
+  local snapshot_domain
+  for snapshot_domain in "${DOMAINS[@]}" "${RETIRED[@]}"; do backup_existing "$snapshot_domain"; done
+  if [ -f /etc/nginx/conf.d/00-aurexis-websocket.conf ]; then
+    $SUDO cp /etc/nginx/conf.d/00-aurexis-websocket.conf "$BACKUP_DIR/shared-map.conf"
+  fi
+  DOMAIN_CONFIG_TMP="$(mktemp -d)"
+  trap finish_domains EXIT
+
+  if [ "$DEPLOY_ENVIRONMENT" != production ]; then
+    [ -s "$DEPLOY_ROOT/.gateway.htpasswd" ] || fail "management access password file missing"
+    $SUDO install -d -m 755 /etc/nginx/aurexis-access
+    $SUDO install -m 644 "$DEPLOY_ROOT/.gateway.htpasswd" "/etc/nginx/aurexis-access/$DEPLOY_ENVIRONMENT.htpasswd"
+  fi
+  # Long randomized labels need a larger bucket; this map supports WebSockets and SSE.
+  printf '%s\n' 'server_names_hash_bucket_size 128;' \
+    'map $http_upgrade $aurexis_connection_upgrade { default upgrade; "" ""; }' \
+    | $SUDO tee /etc/nginx/conf.d/00-aurexis-websocket.conf >/dev/null
 
   if ! ipv6_available; then
     log "WARN host has no IPv6; [::] listeners omitted"
   fi
 
   local domain needs_reload=0
-  DOMAIN_CONFIG_TMP="$(mktemp -d)"
-  trap 'rm -rf "$DOMAIN_CONFIG_TMP"' EXIT
 
   # Pass 1 — make sure every domain has a certificate, publishing HTTP-only where one is
   # missing so the challenge can be answered.
   for domain in "${DOMAINS[@]}"; do
-    backup_existing "$domain"
     disable_conflicts "$domain"
     if cert_is_usable "$domain"; then
       log "$domain: certificate present and outside the ${RENEW_WINDOW_DAYS}-day window; reusing"
@@ -472,6 +523,7 @@ main() {
 
   ensure_renewal
   verify_public
+  retire_production_hosts
   log "done"
 }
 

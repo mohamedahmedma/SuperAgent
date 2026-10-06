@@ -8,7 +8,14 @@
 **/.ruff_cache
 src/frontend/node_modules
 src/frontend/dist
-src/sis/src/frontend/node_modules
+src/sis/frontend/node_modules
+src/sis/frontend/dist
+.local-backups
+local-backup-*
+*.bak
+اداره.txt
+.deployment.env
+.gateway.htpasswd
 volumes
 data
 .env

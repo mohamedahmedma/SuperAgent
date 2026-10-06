@@ -4,3 +4,5 @@
 # core.autocrlf is per-clone and cannot be relied on, so the ending is pinned here.
 *.sh text eol=lf
 deploy/nginx/*.conf text eol=lf
+deploy/nginx/**/*.conf text eol=lf
+deploy/environments/*.env text eol=lf
