@@ -18,7 +18,7 @@
 
 set -uo pipefail
 
-DOMAINS=(auth.aurexis.cc api.aurexis.cc superagent.aurexis.cc)
+source "$(dirname "${BASH_SOURCE[0]}")/load-deployment-profile.sh"
 EXPECTED_IP="${1:-13.140.153.131}"
 
 PASS=0
@@ -62,7 +62,10 @@ for domain in "${DOMAINS[@]}"; do
       | tr -s '[:space:]' '\n' | grep -v '^$' | sort -u)"
     printf '%s\n' "$names" | grep -Fqx "$domain" || continue
     found=1
-    other="$(printf '%s\n' "$names" | grep -vE '^(auth|api|superagent)\.aurexis\.cc$' || true)"
+    other=""
+    while IFS= read -r name; do
+      is_managed_domain "$name" || other="$other $name"
+    done <<< "$names"
     if [ -n "$other" ]; then
       bad "$domain is served by $f, which ALSO serves: $(printf '%s' "$other" | tr '\n' ' ')"
       printf '        The deployment will stop here rather than disable a shared vhost.\n'
@@ -168,15 +171,15 @@ probe() {
     bad "$1 -> $code (expected $2)"
   fi
 }
-probe "http://127.0.0.1:8200/docs" 200
-probe "http://127.0.0.1:8000/health" 200
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:8000/ready 2>/dev/null)"
+probe "http://127.0.0.1:$IDENTITY_HOST_PORT/health" 200
+probe "http://127.0.0.1:$BACKEND_HOST_PORT/health" 200
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:$BACKEND_HOST_PORT/ready 2>/dev/null)"
 code="${code:-000}"
 if [ "$code" = "200" ]; then
-  ok "http://127.0.0.1:8000/ready -> 200"
+  ok "http://127.0.0.1:$BACKEND_HOST_PORT/ready -> 200"
 else
-  warn "http://127.0.0.1:8000/ready -> $code (503 while the embedder warms up is normal; the deploy waits 5 minutes)"
-  curl -s --max-time 10 http://127.0.0.1:8000/ready 2>/dev/null | sed 's/^/        /'
+  warn "http://127.0.0.1:$BACKEND_HOST_PORT/ready -> $code (503 while the embedder warms up is normal; the deploy waits 5 minutes)"
+  curl -s --max-time 10 http://127.0.0.1:$BACKEND_HOST_PORT/ready 2>/dev/null | sed 's/^/        /'
   echo
 fi
 

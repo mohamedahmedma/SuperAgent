@@ -1,13 +1,9 @@
 name: CI
 
 on:
-  # `main` is deliberately absent. Deploy fires on every push to main and calls this
-  # workflow as its first job, so listing main here would race two CI runs over the same
-  # commit. Add it back only if Deploy is ever switched to manual dispatch alone.
-  push:
-    branches: [develop]
+  # Branch pushes run CI once through the three-stage deployment workflow.
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, test]
   # Lets Deploy run this entire suite as a gate before it builds or ships anything.
   workflow_call:
 
@@ -245,6 +241,10 @@ jobs:
             echo "syntax OK  $script"
           done
           shellcheck -S error deploy/scripts/*.sh || echo "shellcheck reported findings (advisory)"
+      - name: Validate generated environment topology
+        run: |
+          python3 deploy/scripts/render-environments.py --check
+          python3 deploy/scripts/check-environment-isolation.py
       - name: Validate Compose
         env:
           POSTGRES_PASSWORD: ci-password
@@ -283,4 +283,4 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
           build-args: |
-            VITE_IDENTITY_BASE_URL=${{ matrix.name == 'frontend' && 'https://auth.aurexis.cc' || '' }}
+            VITE_IDENTITY_BASE_URL=

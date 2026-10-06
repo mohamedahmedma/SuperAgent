@@ -1,5 +1,10 @@
 # SuperAgent operations
 
+For the current three-environment pipeline, credentials and production-domain migration,
+see [deploy/ENVIRONMENTS.md](deploy/ENVIRONMENTS.md). The complete access directory is
+[deploy/ENVIRONMENT_LINKS.md](deploy/ENVIRONMENT_LINKS.md). Production troubleshooting
+below applies to `/opt/superagent` only; dev and test have separate estates.
+
 The stack has a FastAPI backend plus identity, records and SIS services, and a Vue
 frontend served by Nginx. SIS serves its registrar console at `/ui`. Infrastructure is
 PostgreSQL, Redis, etcd, MinIO, Milvus standalone, and Attu.
@@ -10,24 +15,15 @@ conflicts, waits for health checks, and never removes named volumes.
 
 Day-to-day URLs and the full command reference live in `PORTS_AND_COMMANDS.txt`.
 
-## Required GitHub repository secrets
+## Required deployment configuration
 
-| Secret | Purpose |
-| --- | --- |
-| `DEPLOY_HOST` | Ubuntu Docker server hostname or IP. |
-| `DEPLOY_PORT` | **Optional.** SSH port; defaults to `22` when unset. Set it only for a non-standard port. |
-| `DEPLOY_USER` | Restricted deployment user. |
-| `DEPLOY_PASSWORD` | SSH password, stored only as an Actions secret. |
-| `DEPLOY_PATH` | Absolute deployment directory on the server. |
-| `PROD_ENV_FILE` | The complete production environment file, as a multiline secret. |
+The existing production secrets remain in use. Dev and test need their own
+GitHub Environments, bootstrap files and administration logins. The full table
+and environment-variable overrides are documented in
+[deploy/ENVIRONMENTS.md](deploy/ENVIRONMENTS.md).
 
-Deployment is automatic on `main`. Missing deployment secrets fail the pipeline rather
-than allowing an apparently successful run that never updated production.
-
-`GITHUB_TOKEN` is provided automatically by Actions and publishes images to GHCR; it
-does not need to be created. Production credentials stay in GitHub Secrets and in the
-server-side `.env` that `PROD_ENV_FILE` writes. No secret is ever committed, and
-deployment never deletes production volumes.
+The server's existing production `.env` remains persistent. No secret is committed,
+and deployments do not delete volumes.
 
 ## Changing `.env` on a live server
 
@@ -146,32 +142,19 @@ prints nothing and still fails on an unresolvable variable.
 
 ## Pipeline order
 
-`deploy.yml` runs `ci.yml` as its first job and everything else depends on it, so a push
-to `main` goes **CI → CD (publish images) → deploy** in one run. Nothing is pushed to GHCR and nothing
-reaches the server until the full suite — backend tests, both frontends, Compose
-validation and the image builds — has passed.
+`deploy.yml` runs exactly three stages: **CI -> CD (publish the five images) -> Deploy**.
+Push `develop` for dev, `test` for test, and `main` for production. A manual run selects
+its environment. The production ref must be `main`, and the existing `Production`
+GitHub Environment reviewers still approve the final stage.
 
-CI is *called* rather than triggered on its completion. Under a `workflow_run` trigger
-`github.sha` is the default branch head rather than the commit that was pushed, so every
-image would be tagged and deployed for the wrong commit.
+CI is called directly at the pushed commit. Pull requests run CI without deploying;
+branch pushes do not race an additional standalone CI run. Each environment gets its
+own credentials, project name, containers, ports, networks and data volumes.
 
-`main` is therefore not in `ci.yml`'s own push triggers: it would race a second, redundant
-CI run against the deployment it is meant to gate. Pull requests to `main`, and pushes to
-`develop`, still run CI on their own.
-
-## Current automatic production target
-
-Every push to `main` runs the ordered `CI -> CD -> deploy` pipeline. The production
-defaults are host `13.140.153.131`, user `root`, port `22`, and path
-`/opt/superagent`; matching repository secrets can override them. `DEPLOY_PASSWORD`
-and `PROD_ENV_FILE` are mandatory GitHub Actions secrets. A missing value fails the run
-instead of silently skipping deployment.
-
-The `deploy` job targets the GitHub Environment named `production`. Configure that
-environment with both maintainers as required reviewers; GitHub then pauses after CD and
-either reviewer can select **Approve and deploy**. Reviewers are GitHub users or teams,
-not arbitrary email addresses, and each account receives the request according to its
-GitHub notification settings.
+The default server remains `13.140.153.131`. Production retains `/opt/superagent`;
+dev and test deploy to `/opt/superagent-dev` and `/opt/superagent-test`. A repository
+administrator must provision the environments and independent nonproduction secrets
+before their first deployment. See `deploy/ENVIRONMENTS.md` for the configuration.
 
 ## Knowledge-base upload size
 
@@ -180,16 +163,14 @@ among them is the one that answers. All three are now in this repository.
 
 | Hop | Where | Ceiling |
 | --- | --- | --- |
-| Host nginx, `superagent.aurexis.cc` -> `127.0.0.1:3000` | `deploy/nginx/superagent.aurexis.cc.conf` | `512m` |
+| Host nginx, `superagent.aurexis.cc` -> `127.0.0.1:3000` | `deploy/nginx/production/superagent.aurexis.cc.conf` | `512m` |
 | Frontend container nginx | `src/frontend/nginx.conf` | `512m` |
-| Host nginx, `api.aurexis.cc` -> `127.0.0.1:8000` | `deploy/nginx/api.aurexis.cc.conf` | `512m` |
+| Dev/test API and frontend hosts | `deploy/nginx/dev/` and `deploy/nginx/test/` | `512m` |
 
-Which hops apply depends on how the image was built. `frontend/Dockerfile` accepts only
-`VITE_IDENTITY_BASE_URL`, so `VITE_API_BASE_URL` is empty in the bundle and `utils/api.ts`
-posts to the page's own origin — across the first two rows. Set that build arg and uploads
-go to `api.aurexis.cc` instead. All three are kept at the same number so the route cannot
-change the outcome; `tests/general/test_upload_size_limits.py` fails if they drift or if
-any goes missing.
+The deployed frontend uses its own origin for authentication and document uploads.
+Dev/test also publish direct API hosts. Every upload route uses the same ceiling;
+`tests/general/test_upload_size_limits.py` checks all three environments for missing
+or inconsistent limits.
 
 Nothing behind nginx imposes a limit: `save_upload_file` streams the body a megabyte at a
 time, and Starlette's 1 MB `max_part_size` applies to form FIELDS, not to file parts.
@@ -202,18 +183,11 @@ while the container runs `1.27.3-alpine`, and nginx relays an upstream's error b
 unchanged — so the page identified its own author, and the request was never reaching the
 container at all.
 
-**That vhost also fronts SIS**, on `127.0.0.1:8300`: `/v1/`, `/health`, `/docs`,
-`/openapi.json` and `/ui/` are all the registrar console, and only `/` is the chat UI.
-`configure-public-domains.sh` DELETES the vhost it takes over, so those locations are
-reproduced verbatim in `deploy/nginx/superagent.aurexis.cc.conf` and must stay there. A
-rewrite that dropped `/ui/` or `/health` would pass `nginx -t` and take the console down
-silently. `verify_public` checks both halves after every deployment for that reason.
-
-The takeover also means the deploy pipeline now owns SIS's public routing on this host, and
-that the TLS block no longer includes certbot's `options-ssl-nginx.conf` — it states
-`ssl_protocols` directly, as the other two vhosts do, so the vhost cannot become unloadable
-on a host whose certbot has no nginx plugin. The certificate itself is untouched: the
-script only issues one when none exists.
+SIS now has its own production origin, `sis.aurexis.cc`. The SuperAgent host forwards
+`/v1/` to Identity through the frontend proxy, while SIS owns its own `/v1/`, `/health`
+and `/ui/` routes. Production hides `/docs`, `/redoc` and `/openapi.json`; dev/test
+retain their independent API documentation. Environment verification checks each
+selected host after deployment. Unrelated virtual hosts are left alone.
 
 ### Verifying
 
@@ -223,7 +197,7 @@ shows only the host's own two vhosts; the frontend container runs a separate ngi
 is asked separately:
 
 ```bash
-sudo nginx -T | grep -c 'client_max_body_size 512m'   # expect 2
+sudo nginx -T | grep -c 'client_max_body_size 512m'   # 2 production + enabled dev/test hosts
 docker exec superagent-frontend nginx -T | grep -c 'client_max_body_size 512m'   # expect 1
 ```
 

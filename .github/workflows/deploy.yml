@@ -1,556 +1,161 @@
-name: Production pipeline
+name: Environment pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [develop, test, main]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        required: true
+        default: dev
+        options: [dev, test, production]
 
 permissions:
   contents: read
   packages: write
 
 concurrency:
-  group: production
+  group: deploy-${{ inputs.environment || (github.ref_name == 'main' && 'production' || github.ref_name == 'test' && 'test' || 'dev') }}
   cancel-in-progress: false
 
 env:
-  REGISTRY: ghcr.io
+  TARGET_ENVIRONMENT: ${{ inputs.environment || (github.ref_name == 'main' && 'production' || github.ref_name == 'test' && 'test' || 'dev') }}
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/superagent
-  VITE_IDENTITY_BASE_URL: https://auth.aurexis.cc
 
 jobs:
   ci:
     name: Stage 1 - CI
+    if: inputs.environment != 'production' || github.ref == 'refs/heads/main'
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
 
-  changes:
-    name: Stage 2 - Detect changed services
+  publish:
+    name: Stage 2 - CD (${{ matrix.service }})
     needs: ci
     runs-on: ubuntu-latest
-    outputs:
-      backend: ${{ steps.detect.outputs.backend }}
-      frontend: ${{ steps.detect.outputs.frontend }}
-      identity: ${{ steps.detect.outputs.identity }}
-      records: ${{ steps.detect.outputs.records }}
-      sis: ${{ steps.detect.outputs.sis }}
-      services: ${{ steps.detect.outputs.services }}
-    steps:
-      - uses: actions/checkout@v4
-        with: {fetch-depth: 0}
-      - id: detect
-        shell: bash
-        run: |
-          # The baseline is the last commit that actually FINISHED a successful deploy -
-          # a tag the `mark-deployed` job at the end of this workflow moves, and only once
-          # `deploy` (every step of it, including the external verification at the end)
-          # has succeeded. `github.event.before` (the branch tip before this push) is not
-          # that: it still advances when a push's own CI or CD failed, so the next push's
-          # diff silently treats the failed push's changes as already deployed and never
-          # rebuilds the services they touched.
-          #
-          # That is what happened on 2026-10-02: a push moved every backend/identity/
-          # records/sis file under src/, but failed Stage 1 CI, so Stage 3 never ran for
-          # it. The next push touched only frontend files, diffed from that failed push's
-          # SHA as `before`, and correctly saw no backend/identity/records/sis change - so
-          # those services kept running their pre-move images, whose `alembic.ini` was not
-          # at the path this workflow now runs it from, and the release failed migrating.
-          #
-          # A missing or unreachable tag (first run ever, or a history this checkout does
-          # not have) falls back to `github.event.before` exactly as before; a diff against
-          # that failing in turn falls back to `git ls-files` - every file, every service
-          # rebuilt - which is the fail-open behaviour this script already had.
-          git fetch origin 'refs/tags/production-deployed:refs/tags/production-deployed' 2>/dev/null || true
-          baseline="$(git rev-parse --verify -q production-deployed || echo '${{ github.event.before }}')"
-          changed="$(git diff --name-only "$baseline" "$GITHUB_SHA" 2>/dev/null || git ls-files)"
-          all=false; backend=false; frontend=false; identity=false; records=false; sis=false
-          while IFS= read -r file; do
-            case "$file" in
-              # A CI-policy change commonly follows a failed release (for example, a
-              # dependency-download timeout). Rebuild every image in that recovery run;
-              # otherwise the pipeline can go green while silently skipping the app
-              # commit whose previous production run never published its image.
-              .github/workflows/ci.yml|.github/workflows/deploy.yml|docker-compose*.yml|Dockerfile|pyproject.toml|uv.lock) all=true ;;
-              src/backend/*) backend=true ;;
-              src/frontend/*) frontend=true ;;
-              src/identity/*) identity=true ;;
-              src/records/*) records=true ;;
-              src/sis/*) sis=true ;;
-              src/schoolauth/*) backend=true; identity=true; records=true ;;
-            esac
-          done <<< "$changed"
-          if [ "$all" = true ]; then backend=true; frontend=true; identity=true; records=true; sis=true; fi
-          services=""
-          for service in backend frontend identity records sis; do
-            value="${!service}"
-            echo "$service=$value" >> "$GITHUB_OUTPUT"
-            [ "$value" = true ] && services="$services $service"
-          done
-          echo "services=${services# }" >> "$GITHUB_OUTPUT"
-
-  cd-publish-backend:
-    name: CD - Publish backend image
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {service: backend, dockerfile: Dockerfile}
+          - {service: frontend, dockerfile: src/frontend/Dockerfile}
+          - {service: identity, dockerfile: src/identity/Dockerfile}
+          - {service: records, dockerfile: src/records/Dockerfile}
+          - {service: sis, dockerfile: src/sis/Dockerfile}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/backend:${{ github.sha }}
-            ${{ env.IMAGE_PREFIX }}/backend:stable
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
-
-  cd-publish-frontend:
-    name: CD - Publish frontend image
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: src/frontend/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/frontend:${{ github.sha }}
-            ${{ env.IMAGE_PREFIX }}/frontend:stable
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,mode=max,scope=frontend
+          # Complete immutable releases, without racing a shared stable tag.
+          tags: ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          # Authentication uses the UI origin in every environment.
           build-args: |
-            VITE_IDENTITY_BASE_URL=${{ env.VITE_IDENTITY_BASE_URL }}
-
-  cd-publish-identity:
-    name: CD - Publish identity image
-    needs: changes
-    if: needs.changes.outputs.identity == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: src/identity/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/identity:${{ github.sha }}
-            ${{ env.IMAGE_PREFIX }}/identity:stable
-          cache-from: type=gha,scope=identity
-          cache-to: type=gha,mode=max,scope=identity
-
-  cd-publish-records:
-    name: CD - Publish records image
-    needs: changes
-    if: needs.changes.outputs.records == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: src/records/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/records:${{ github.sha }}
-            ${{ env.IMAGE_PREFIX }}/records:stable
-          cache-from: type=gha,scope=records
-          cache-to: type=gha,mode=max,scope=records
-
-  cd-publish-sis:
-    name: CD - Publish sis image
-    needs: changes
-    if: needs.changes.outputs.sis == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: src/sis/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/sis:${{ github.sha }}
-            ${{ env.IMAGE_PREFIX }}/sis:stable
-          cache-from: type=gha,scope=sis
-          cache-to: type=gha,mode=max,scope=sis
-
-  cd-release-ready:
-    name: CD - All release images published
-    needs:
-      - changes
-      - cd-publish-backend
-      - cd-publish-frontend
-      - cd-publish-identity
-      - cd-publish-records
-      - cd-publish-sis
-    runs-on: ubuntu-latest
-    # Each unchanged service is intentionally skipped. Opt out of GitHub's implicit
-    # success() check, but still reject a failed image build or a cancelled run.
-    if: >-
-      ${{
-        !cancelled() &&
-        needs.changes.result == 'success' &&
-        (needs.cd-publish-backend.result == 'success' || needs.cd-publish-backend.result == 'skipped') &&
-        (needs.cd-publish-frontend.result == 'success' || needs.cd-publish-frontend.result == 'skipped') &&
-        (needs.cd-publish-identity.result == 'success' || needs.cd-publish-identity.result == 'skipped') &&
-        (needs.cd-publish-records.result == 'success' || needs.cd-publish-records.result == 'skipped') &&
-        (needs.cd-publish-sis.result == 'success' || needs.cd-publish-sis.result == 'skipped')
-      }}
-    steps:
-      - run: echo "All release images for ${{ github.sha }} were published successfully."
+            VITE_IDENTITY_BASE_URL=
 
   deploy:
-    name: Stage 3 - Deploy production (approval required)
-    needs: [changes, cd-release-ready]
-    # A skipped service job in the transitive dependency chain otherwise causes this
-    # job to be skipped before GitHub can present the environment approval prompt.
-    if: >-
-      ${{
-        !cancelled() &&
-        needs.changes.result == 'success' &&
-        needs.cd-release-ready.result == 'success'
-      }}
+    name: Stage 3 - Deploy
+    needs: publish
     runs-on: ubuntu-latest
-    # Configure `production` in GitHub Settings with both maintainers as required
-    # reviewers. GitHub pauses this job here; either one may approve it.
     environment:
-      name: production
+      name: ${{ inputs.environment || (github.ref_name == 'main' && 'production' || github.ref_name == 'test' && 'test' || 'dev') }}
     env:
-      DEPLOY_HOST: 13.140.153.131
-      DEPLOY_PORT: '22'
-      DEPLOY_USER: root
-      DEPLOY_PATH: /opt/superagent
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST || '13.140.153.131' }}
+      DEPLOY_PUBLIC_IP: ${{ vars.DEPLOY_PUBLIC_IP || vars.DEPLOY_HOST || '13.140.153.131' }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER || 'root' }}
       SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
+      DEV_ENV_FILE: ${{ secrets.DEV_ENV_FILE }}
+      TEST_ENV_FILE: ${{ secrets.TEST_ENV_FILE }}
       PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
+      GATEWAY_HTPASSWD: ${{ secrets.GATEWAY_HTPASSWD }}
+      LETSENCRYPT_EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
       GHCR_USER: ${{ github.actor }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      DEPLOY_SERVICES: ${{ needs.changes.outputs.services }}
-      IMAGE_TAG: ${{ github.sha }}
-      # Only consulted when a certificate is missing. An estate whose certificates are
-      # already issued deploys without it.
-      LETSENCRYPT_EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
+      SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
     steps:
       - uses: actions/checkout@v4
-      - name: Validate deployment configuration
+      - name: Select and validate the estate
+        shell: bash
         run: |
-          missing=""
-          for name in DEPLOY_HOST DEPLOY_PORT DEPLOY_USER DEPLOY_PATH SSHPASS; do
-            if [ -z "${!name}" ]; then missing="$missing $name"; fi
-          done
-          if [ -n "$missing" ]; then
-            echo "::error::Missing deployment configuration:$missing"
-            exit 1
-          fi
-          case "$DEPLOY_PORT" in
-            *[!0-9]*|'') echo "::error::DEPLOY_PORT must be numeric"; exit 1 ;;
+          set -euo pipefail
+          case "$TARGET_ENVIRONMENT" in
+            dev) deploy_path=/opt/superagent-dev ;;
+            test) deploy_path=/opt/superagent-test ;;
+            production)
+              [ "$GITHUB_REF" = refs/heads/main ] || exit 1
+              deploy_path=/opt/superagent ;;
+            *) exit 1 ;;
           esac
-      - name: Install SSH password client
-        run: sudo apt-get update && sudo apt-get install -y sshpass
-      - name: Trust deployment server
+          [ -n "$SSHPASS" ] || { echo '::error::DEPLOY_PASSWORD is missing'; exit 1; }
+          case "$DEPLOY_PORT" in *[!0-9]*|'') exit 1 ;; esac
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]] || exit 1
+          [[ "$DEPLOY_PUBLIC_IP" =~ ^[0-9.]+$ ]] || exit 1
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || exit 1
+          if [ "$TARGET_ENVIRONMENT" != production ]; then
+            [ -n "$GATEWAY_HTPASSWD" ] || { echo '::error::Environment GATEWAY_HTPASSWD is missing'; exit 1; }
+          fi
+          echo "DEPLOY_PATH=$deploy_path" >> "$GITHUB_ENV"
+          cp "deploy/environments/$TARGET_ENVIRONMENT.env" .deployment.env
+      - name: Install SSH client and trust server
+        shell: bash
         run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y sshpass
           install -m 700 -d ~/.ssh
-          ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" > /tmp/hostkeys || true
-          if ! [ -s /tmp/hostkeys ]; then
-            echo "::error::No SSH host key received from $DEPLOY_HOST:$DEPLOY_PORT"
-            exit 1
-          fi
-          cat /tmp/hostkeys >> ~/.ssh/known_hosts
-      - name: Prepare server and copy Compose configuration
-        run: |
-          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
-          sshpass -e scp -P "$DEPLOY_PORT" docker-compose.yml docker-compose.prod.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
-          # The public-domain configuration is repository-managed, so it ships with every
-          # release and an edit made on the server does not survive one.
-          sshpass -e scp -P "$DEPLOY_PORT" -r deploy "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
-      - name: Install production environment and authenticate registry
-        run: |
-          # PROD_ENV_FILE bootstraps a new estate only. Once present, the server's
-          # operator-validated .env is persistent state and must survive deployments.
-          if sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "test -f '$DEPLOY_PATH/.env'"; then
-            sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "chown root:root '$DEPLOY_PATH/.env' && chmod 600 '$DEPLOY_PATH/.env' && test \"\$(stat -c %a '$DEPLOY_PATH/.env')\" = 600"
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           else
-            if [ -z "$PROD_ENV_FILE" ]; then
-              echo "::error::Production .env is absent and PROD_ENV_FILE is not configured"
-              exit 1
-            fi
-            printf '%s' "$PROD_ENV_FILE" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "umask 077; tmp_env='$DEPLOY_PATH/.env.bootstrap.\$\$'; trap 'rm -f \"\$tmp_env\"' EXIT; cat > \"\$tmp_env\"; test -s \"\$tmp_env\"; chown root:root \"\$tmp_env\"; chmod 600 \"\$tmp_env\"; mv -f \"\$tmp_env\" '$DEPLOY_PATH/.env'; trap - EXIT"
+            ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" > ~/.ssh/known_hosts
           fi
-          printf '%s' "$GHCR_TOKEN" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
-          # Delivered as a file for the same reason as .env: a command line is visible in
-          # the process table, and this is only read when a certificate has to be issued.
-          printf '%s' "$LETSENCRYPT_EMAIL" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "cat > '$DEPLOY_PATH/.letsencrypt-email' && chmod 600 '$DEPLOY_PATH/.letsencrypt-email'"
-      - name: Deploy, verify, and roll back on failure
+          test -s ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Copy topology and bootstrap separate credentials
+        shell: bash
         run: |
-          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" "$IMAGE_TAG" "$IMAGE_PREFIX" "$DEPLOY_SERVICES" <<'REMOTE'
-          set -eu
-          deploy_path="$1"
-          image_tag="$2"
-          image_prefix="$3"
-          # ssh rebuilds the remote command as ONE string, so the quotes around the
-          # services list do not survive and every word in it arrives as its own
-          # argument. `services="${4-}"` therefore kept only the first word: a release
-          # detected as "backend frontend identity records sis" pulled and recreated the
-          # backend alone, left the frontend and identity on images from earlier
-          # releases, and was still reported a success (2026-09-15 — the voice-note UI
-          # and the session renewal shipped to main and never reached a browser).
-          # Everything after the third argument is the list; a documentation-only
-          # release arrives with nothing there.
-          shift 3
-          services="$*"
-          cd "$deploy_path"
-          echo "Release $image_tag: services [${services:-none}]"
-          # A documentation-only change has no application image to release.
-          [ -n "$services" ] || exit 0
-          tags_file=".release-image-tags"
-          if [ ! -f "$tags_file" ]; then
-            printf '%s\n' BACKEND_IMAGE_TAG=stable FRONTEND_IMAGE_TAG=stable IDENTITY_IMAGE_TAG=stable RECORDS_IMAGE_TAG=stable SIS_IMAGE_TAG=stable > "$tags_file"
+          set -euo pipefail
+          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          sshpass -e scp -P "$DEPLOY_PORT" docker-compose.yml docker-compose.prod.yml .deployment.env "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+          sshpass -e scp -P "$DEPLOY_PORT" -r deploy "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+          if ! sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "test -s '$DEPLOY_PATH/.env'"; then
+            case "$TARGET_ENVIRONMENT" in
+              dev) bootstrap="$DEV_ENV_FILE" ;;
+              test) bootstrap="$TEST_ENV_FILE" ;;
+              production) bootstrap="$PROD_ENV_FILE" ;;
+            esac
+            [ -n "$bootstrap" ] || { echo "::error::The $TARGET_ENVIRONMENT environment file is missing"; exit 1; }
+            printf '%s' "$bootstrap" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "umask 077; cat > '$DEPLOY_PATH/.env.bootstrap'; test -s '$DEPLOY_PATH/.env.bootstrap'; mv '$DEPLOY_PATH/.env.bootstrap' '$DEPLOY_PATH/.env'"
           fi
-          # The registry path belongs in the manifest, not only in this shell. It used to be
-          # exported below and nowhere else, so apply-env.sh run by hand from an ssh session -
-          # the route its own header documents - stopped at interpolation on 2026-09-11: the
-          # one value only the pipeline knew lived in exactly one codepath. Written before the
-          # copy so that a rollback's manifest carries it too.
-          sed -i '/^REGISTRY_IMAGE_PREFIX=/d' "$tags_file"
-          printf 'REGISTRY_IMAGE_PREFIX=%s\n' "$image_prefix" >> "$tags_file"
-          cp "$tags_file" "${tags_file}.previous"
-          for service in $services; do
-            key="$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]')_IMAGE_TAG"
-            sed -i "/^${key}=/d" "$tags_file"
-            printf '%s=%s\n' "$key" "$image_tag" >> "$tags_file"
-          done
-          compose="docker compose --env-file .env --env-file $tags_file -f docker-compose.yml -f docker-compose.prod.yml"
-          # Compose interpolates every service even when only one is named, so every
-          # service tag is persisted in the release manifest before it is invoked.
-          export REGISTRY_IMAGE_PREFIX="$image_prefix"
-
-          previous=""
-          if [ -f .current-image-tag ]; then previous="$(cat .current-image-tag)"; fi
-          current_env_hash="$(sha256sum .env | awk '{print $1}')"
-          previous_env_hash=""
-          if [ -f .current-env-sha256 ]; then previous_env_hash="$(cat .current-env-sha256)"; fi
-
-          # The application services a release manages, and the subset that reads .env at
-          # runtime. The frontend is a static bundle: its settings are compiled in at image
-          # build time from this workflow, so recreating it cannot apply .env to it.
-          app_services="backend frontend identity records sis"
-          env_services="backend identity records sis"
-
-          # Every application service follows the server's .env, not only the ones this
-          # release rebuilt. This used to recreate only $services, so a backend-only release
-          # left records, identity and sis on whatever .env they were created with — LangSmith
-          # settings included — and a service that was not running stayed down, then failed
-          # the health gate of a release that never touched it (2026-09-11: a stopped
-          # frontend failed a backend release twice).
-          #
-          # An edited .env reaches nothing on its own: compose decides what to recreate from
-          # each service's configuration, and an edited env_file is not reliably treated as a
-          # change to it. So every service that reads the file is force-recreated whenever it
-          # differs from the one the last successful release applied.
-          #
-          # Pull first, recreate second, so a registry that fails cannot take a running
-          # container down with it. `--pull missing` then only reaches the registry for an
-          # image that is not on disk at all.
-          release() {
-            $compose pull $services || return 1
-            if [ "$current_env_hash" != "$previous_env_hash" ]; then
-              $compose up -d --no-deps --pull missing --force-recreate $env_services || return 1
-            fi
-            # Recreates whatever changed image, starts whatever is stopped, leaves the rest.
-            $compose up -d --no-deps --pull missing $app_services || return 1
-          }
-
-          # Each released service must be RUNNING this release's image, checked by the
-          # container's own record rather than by the manifest we just wrote. The health
-          # gate below cannot tell a new frontend from an old one — both answer 200 — so a
-          # release that recreated only some of its services passed it. Container names
-          # are fixed in docker-compose.yml, which is what makes `docker inspect` exact.
-          running_this_release() {
-            local service image
-            for service in $services; do
-              image="$(docker inspect --format '{{.Config.Image}}' "superagent-$service" 2>/dev/null || true)"
-              case "$image" in
-                *":$image_tag") echo "$service runs $image" ;;
-                *) echo "$service runs ${image:-no container}, not :$image_tag"; return 1 ;;
-              esac
-            done
-          }
-
-          healthy() {
-            timeout 300 sh -c 'until wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1 && wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1; do sleep 5; done'
-          }
-
-          # Reconcile the postgres role with .env, and prove the credential authenticates
-          # over TCP, before the release recreates anything.
-          #
-          # This used to be forty lines inline here, and that placement was the bug. A
-          # heredoc delivered on ssh's stdin is unreachable from an ssh session, so the
-          # only path that knew POSTGRES_PASSWORD needs reconciling was the pipeline —
-          # and on 2026-09-10 the estate was taken down by a manual `scp .env` followed
-          # by `compose up`, a route with no reconcile step at all. One committed script,
-          # both callers, so the manual route cannot skip what this one does.
-          #
-          # `</dev/null` is load-bearing. This script reaches the server on ssh's stdin
-          # via `bash -s`, and `compose exec -T` inside the callee attaches stdin and
-          # drains it — so a call that inherits it swallows the unread remainder of this
-          # script. Bash then runs only what it had buffered and exits 0 at the early
-          # EOF: the release never happens and the job still reports success.
-          bash deploy/scripts/apply-env.sh --path "$deploy_path" </dev/null || exit 1
-
-          # Everything that has to hold for a release to count, behind one status. It is
-          # called as an `if` condition, which is the point: `set -e` is suspended for the
-          # whole call tree of a command being tested, so a step that fails returns here
-          # instead of killing the script. Without that, `compose up` exiting on "container
-          # is unhealthy" ended the run before the diagnosis below — which is exactly how a
-          # failed deploy reported an unhealthy container and not one line of its log.
-          attempt() {
-            # Brings every application service onto this release's images and onto the
-            # server's .env. The health gate runs after it, so a release only counts once it
-            # is working WITH the .env applied: a bad value fails here and rolls back, instead
-            # of being applied after a green run where nothing would check it.
-            release || return 1
-            running_this_release || return 1
-            healthy || return 1
-            # sis runs `alembic upgrade head` in its own entrypoint, so a sis that is
-            # healthy has already migrated. This covers the release where sis was not
-            # recreated at all, and it runs after the health gate rather than before it so
-            # it cannot race a container that is still coming up.
-            $compose exec -T sis alembic -c src/sis/alembic.ini upgrade head </dev/null || return 1
-            # The backend likewise upgrades before uvicorn and will not start on a database
-            # behind its build, so a healthy backend has migrated too; this covers the
-            # release that did not recreate it.
-            $compose exec -T backend alembic -c src/backend/alembic.ini upgrade head </dev/null || return 1
-          }
-
-          if attempt "$image_tag"; then
-            printf '%s' "$image_tag" > .current-image-tag
-            printf '%s' "$current_env_hash" > .current-env-sha256
-            if [ -n "$previous" ]; then printf '%s' "$previous" > .previous-image-tag; fi
-            $compose ps
-            exit 0
+          # Preserve the operator-validated environment file on later releases.
+          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "chmod 600 '$DEPLOY_PATH/.env'"
+          if [ "$TARGET_ENVIRONMENT" != production ]; then
+            printf '%s\n' "$GATEWAY_HTPASSWD" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "umask 077; cat > '$DEPLOY_PATH/.gateway.htpasswd'"
           fi
-
-          echo "Release failed for $image_tag"
-          # Without this the job ends on "container is unhealthy" and the reason stays on
-          # a server nobody can reach from the run. The logs are the whole diagnosis, and
-          # which service is at fault is not known here — backend is the usual answer
-          # because it is the only one that speaks to postgres, but a release that fails
-          # for another reason should not have to be re-run to say so.
-          $compose ps || true
-          for service in $services; do
-            echo "--- $service logs (last 100 lines) ---"
-            $compose logs --no-color --tail 100 "$service" || true
-          done
-          if [ -f "${tags_file}.previous" ]; then
-            echo "Rolling back the changed service tags"
-            mv -f "${tags_file}.previous" "$tags_file"
-            release || true
-            healthy || true
-          fi
-          $compose ps
-          exit 1
-          REMOTE
-      # Read-only, and deliberately before anything is installed. It reports the host
-      # facts the next step depends on — which vhost already claims these names, whether
-      # port 80 can answer an ACME challenge, what certificates exist — so a run that
-      # cannot succeed says why before it has touched nginx at all, and the answer is in
-      # this log rather than on a server someone has to open a session against.
-      - name: Pre-flight the public-domain prerequisites
+          printf '%s' "$LETSENCRYPT_EMAIL" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "umask 077; cat > '$DEPLOY_PATH/.letsencrypt-email'"
+          printf '%s' "$GHCR_TOKEN" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+      - name: Release and restore previous images on failure
+        shell: bash
         run: |
+          set -euo pipefail
           sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "bash '$DEPLOY_PATH/deploy/scripts/preflight-public-domains.sh' '$DEPLOY_HOST'" </dev/null
-      # Runs only once the stack above is healthy, so the domains are never pointed at a
-      # release that did not come up. The script is executed as a file rather than piped
-      # to `bash -s`: a script delivered on stdin is eaten by anything inside it that
-      # reads stdin, which is how a previous release reported success without deploying.
-      - name: Configure public domains, certificates, and Nginx
-        run: |
-          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "chmod +x '$DEPLOY_PATH/deploy/scripts/configure-public-domains.sh' && bash '$DEPLOY_PATH/deploy/scripts/configure-public-domains.sh' '$DEPLOY_HOST'" </dev/null
-      # The VPS checked the same URLs from inside its own network. This repeats them from
-      # outside it, which is the only vantage point that also proves 443 is reachable and
-      # the chain verifies against a store the server does not control.
-      - name: Verify public endpoints from outside the VPS
-        run: |
-          fail=0
-          for url in \
-            "https://auth.aurexis.cc/docs" \
-            "https://api.aurexis.cc/docs" \
-            "https://api.aurexis.cc/health" \
-            "https://api.aurexis.cc/ready" \
-            "https://superagent.aurexis.cc/" \
-            "https://superagent.aurexis.cc/health"; do
-            code="$(curl -s -o /dev/null -w '%{http_code}' --retry 5 --retry-delay 5 --retry-all-errors --max-time 20 "$url" || echo 000)"
-            if [ "$code" = "200" ]; then
-              echo "OK  $url -> $code"
-            else
-              echo "::error::$url returned $code (wanted 200)"
-              fail=1
-            fi
-          done
-          [ "$fail" -eq 0 ]
-
-  mark-deployed:
-    name: Stage 4 - Record this as the last successful deploy
-    needs: deploy
-    # The default: a job is skipped if any job it `needs` failed or was skipped. So this
-    # runs only once `deploy` - every step of it, including the external verification
-    # above - has actually succeeded.
-    runs-on: ubuntu-latest
-    # A job's `permissions:` REPLACES the workflow-level block above rather than adding
-    # to it. Kept in its own job, and only for the few seconds this takes: a write-capable
-    # token sitting in `deploy`'s workspace for the whole release (ssh, curl, apt-get)
-    # would widen what a compromise of any one of those steps could reach, for no benefit
-    # over giving it only to the one step that actually needs it.
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      # `concurrency: {group: production}` above serializes this workflow, so two runs
-      # never race to move the same tag. `--force` because the tag is meant to move, not
-      # accumulate history: "Detect changed services" only ever reads where it points
-      # today. A failure here is this job's own red X, separate from "Stage 3 - Deploy
-      # production"'s - so it cannot be read as the release itself having failed or been
-      # rolled back, which it was not.
-      - name: Mark this commit as the last successful production deploy
-        run: |
-          git tag -f production-deployed "$GITHUB_SHA"
-          git push origin production-deployed --force
+            "bash '$DEPLOY_PATH/deploy/scripts/release-environment.sh' '$DEPLOY_PATH' '$GITHUB_SHA' '$IMAGE_PREFIX' '$TARGET_ENVIRONMENT' '$DEPLOY_PUBLIC_IP'" </dev/null
+      - name: Verify public routing outside the server
+        run: bash deploy/scripts/verify-public-endpoints.sh

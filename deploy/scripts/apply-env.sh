@@ -80,6 +80,7 @@ bad()   { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; }
 head_() { printf '\n=== %s ===\n' "$*"; }
 die()   { bad "$*"; exit 1; }
 
+source "$(dirname "${BASH_SOURCE[0]}")/load-deployment-profile.sh"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.prod.yml)
 # CI writes the per-service image tags it just published into this manifest and layers it
 # over .env. It is absent on a manual run, where .env's own IMAGE_TAG stands.
@@ -197,7 +198,7 @@ ok "recreated against the current .env"
 
 if [ "$RUN_HEALTH" = true ]; then
   head_ "5. health gate"
-  if timeout 300 sh -c 'until wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1; do sleep 5; done'; then
+  if timeout 300 sh -c 'until wget -qO- http://127.0.0.1:$BACKEND_HOST_PORT/health >/dev/null 2>&1; do sleep 5; done'; then
     ok "backend /health answers"
   else
     bad "backend did not become healthy in 300s - its own diagnosis:"

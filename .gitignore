@@ -70,6 +70,8 @@ htmlcov/
 # Per-developer environment overrides. .env.example stays tracked as the template.
 .env.local
 .env.*.local
+.deployment.env
+.gateway.htpasswd
 
 # Deployment runbook. Local only: it carries the commands for uploading .env to a
 # server, and quotes real credentials inline while doing it. Untracked rather than
