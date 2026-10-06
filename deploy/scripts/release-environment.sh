@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Release a complete immutable image set into exactly one isolated estate.
+# Promote the frozen image manifest into exactly one isolated estate.
 set -euo pipefail
 deploy_path="${1:?deployment path required}"
 image_tag="${2:?image tag required}"
@@ -14,6 +14,20 @@ if [ "$environment" != production ]; then
   [ "$deploy_path" != /opt/superagent ] || { echo 'Nonproduction cannot use the production directory'; exit 2; }
 fi
 [ -s .env ] || { echo 'Environment credentials absent'; exit 1; }
+candidate_tags=".candidate-image-tags-$image_tag"
+[ -s "$candidate_tags" ] || { echo 'Approved release manifest absent'; exit 1; }
+declare -A candidate_values=()
+while IFS='=' read -r key value; do
+  case "$key" in
+    REGISTRY_IMAGE_PREFIX) [ "$value" = "$image_prefix" ] || exit 2 ;;
+    BACKEND_IMAGE_TAG|FRONTEND_IMAGE_TAG|IDENTITY_IMAGE_TAG|RECORDS_IMAGE_TAG|SIS_IMAGE_TAG)
+      [[ "$value" =~ ^[0-9a-f]{40}$ ]] || exit 2 ;;
+    *) echo 'Unknown manifest setting'; exit 2 ;;
+  esac
+  [ -z "${candidate_values[$key]+x}" ] || { echo 'Duplicate manifest setting'; exit 2; }
+  candidate_values["$key"]="$value"
+done < "$candidate_tags"
+[ "${#candidate_values[@]}" -eq 6 ] || { echo 'Incomplete manifest'; exit 2; }
 # Infrastructure, application data and keys belong to this stack's named volumes.
 compose=(docker compose --env-file .env --env-file .deployment.env
   --env-file .release-image-tags -f docker-compose.yml -f docker-compose.prod.yml)
@@ -26,11 +40,14 @@ umask 077
 {
   printf 'REGISTRY_IMAGE_PREFIX=%s\n' "$image_prefix"
   for service in BACKEND FRONTEND IDENTITY RECORDS SIS; do
-    printf '%s_IMAGE_TAG=%s\n' "$service" "$image_tag"
+    printf '%s_IMAGE_TAG=%s\n' "$service" "${candidate_values[${service}_IMAGE_TAG]}"
   done
 } > .release-image-tags.next
 mv .release-image-tags.next .release-image-tags
 apps=(backend frontend identity records sis)
+current_env_hash="$(cat .env .deployment.env | sha256sum | awk '{print $1}')"
+previous_env_hash=""
+if [ -f .current-env-sha256 ]; then previous_env_hash="$(cat .current-env-sha256)"; fi
 
 healthy() {
   local service container state url
@@ -66,12 +83,18 @@ attempt() {
   "${compose[@]}" up -d --no-build --pull missing --wait --wait-timeout 300 \
     postgres redis etcd minio standalone attu || return 1
   bash deploy/scripts/apply-env.sh --path "$deploy_path" </dev/null || return 1
-  "${compose[@]}" up -d --no-deps --no-build --pull never --force-recreate "${apps[@]}" || return 1
+  if [ "$current_env_hash" != "$previous_env_hash" ]; then
+    "${compose[@]}" up -d --no-deps --no-build --pull never --force-recreate \
+      backend identity records sis || return 1
+  fi
+  # Preserve incremental deployment: unchanged images remain running.
+  "${compose[@]}" up -d --no-deps --no-build --pull never "${apps[@]}" || return 1
   wait_healthy || return 1
-  local service actual
+  local service actual key
   for service in "${apps[@]}"; do
     actual="$(docker inspect -f '{{.Config.Image}}' "$STACK_NAME-$service")" || return 1
-    [ "$actual" = "$image_prefix/$service:$image_tag" ] || return 1
+    key="$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]')_IMAGE_TAG"
+    [ "$actual" = "$image_prefix/$service:${candidate_values[$key]}" ] || return 1
   done
 }
 if ! attempt; then rollback; exit 1; fi
@@ -81,4 +104,5 @@ if ! bash deploy/scripts/configure-public-domains.sh "${5:?public IP required}" 
   exit 1
 fi
 printf '%s\n' "$image_tag" > .current-image-tag
+printf '%s\n' "$current_env_hash" > .current-env-sha256
 "${compose[@]}" ps
