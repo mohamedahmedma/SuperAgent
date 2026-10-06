@@ -1,9 +1,11 @@
 name: CI
 
 on:
-  # Branch pushes run CI once through the three-stage deployment workflow.
+  # main runs CI through the original release pipeline; develop runs CI only.
+  push:
+    branches: [develop]
   pull_request:
-    branches: [main, develop, test]
+    branches: [main, develop]
   # Lets Deploy run this entire suite as a gate before it builds or ships anything.
   workflow_call:
 

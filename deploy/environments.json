@@ -1,6 +1,6 @@
 {
   "dev": {
-    "branch": "develop",
+    "branch": "main",
     "public_ip": "13.140.153.131",
     "port_offset": 10000,
     "domains": {
@@ -17,7 +17,7 @@
     }
   },
   "test": {
-    "branch": "test",
+    "branch": "main",
     "public_ip": "13.140.153.131",
     "port_offset": 20000,
     "domains": {

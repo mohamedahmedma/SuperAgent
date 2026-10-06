@@ -142,19 +142,23 @@ prints nothing and still fails on an unresolvable variable.
 
 ## Pipeline order
 
-`deploy.yml` runs exactly three stages: **CI -> CD (publish the five images) -> Deploy**.
-Push `develop` for dev, `test` for test, and `main` for production. A manual run selects
-its environment. The production ref must be `main`, and the existing `Production`
-GitHub Environment reviewers still approve the final stage.
+The original workflow layout is retained: CI, changed-service detection/CD,
+deployment, and recording the successful production release. Push `main` to prepare
+one candidate; `develop` runs standalone CI as before. A manual release must use `main`.
 
-CI is called directly at the pushed commit. Pull requests run CI without deploying;
-branch pushes do not race an additional standalone CI run. Each environment gets its
-own credentials, project name, containers, ports, networks and data volumes.
+Deployment is **dev approval -> dev success -> test approval -> test success ->
+production approval -> production success**. Each owner chooses whether to pull the
+candidate by approving their environment. The exact frozen image manifest moves
+between environments, with no rebuild during promotion and no route that skips test.
+
+All three GitHub Environments must match the existing Production reviewers and
+approval settings. `approval-policy.py` verifies this before builds/deployments and
+provides an administrator-only policy-copy command. The original `production-deployed`
+tag is updated only after the last production gate and verification succeed.
 
 The default server remains `13.140.153.131`. Production retains `/opt/superagent`;
-dev and test deploy to `/opt/superagent-dev` and `/opt/superagent-test`. A repository
-administrator must provision the environments and independent nonproduction secrets
-before their first deployment. See `deploy/ENVIRONMENTS.md` for the configuration.
+dev and test deploy to `/opt/superagent-dev` and `/opt/superagent-test`. See
+`deploy/ENVIRONMENTS.md` for the matching approval policies and separate secrets.
 
 ## Knowledge-base upload size
 

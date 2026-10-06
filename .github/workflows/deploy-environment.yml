@@ -1,0 +1,117 @@
+name: Deploy approved environment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Protected environment in the promotion chain
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    name: Deploy approved environment
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+    env:
+      TARGET_ENVIRONMENT: ${{ inputs.environment }}
+      IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/superagent
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST || '13.140.153.131' }}
+      DEPLOY_PUBLIC_IP: ${{ vars.DEPLOY_PUBLIC_IP || vars.DEPLOY_HOST || '13.140.153.131' }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER || 'root' }}
+      SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
+      DEV_ENV_FILE: ${{ secrets.DEV_ENV_FILE }}
+      TEST_ENV_FILE: ${{ secrets.TEST_ENV_FILE }}
+      PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
+      GATEWAY_HTPASSWD: ${{ secrets.GATEWAY_HTPASSWD }}
+      LETSENCRYPT_EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
+      GHCR_USER: ${{ github.actor }}
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-manifest-${{ github.sha }}
+      - name: Validate the exact image versions being promoted
+        run: |
+          python3 deploy/scripts/release-manifest.py validate release-manifest.json \
+            --release "$GITHUB_SHA" --prefix "$IMAGE_PREFIX" --tags-output candidate-image-tags.env
+      - name: Select and validate the estate
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TARGET_ENVIRONMENT" in
+            dev) deploy_path=/opt/superagent-dev ;;
+            test) deploy_path=/opt/superagent-test ;;
+            production)
+              [ "$GITHUB_REF" = refs/heads/main ] || exit 1
+              deploy_path=/opt/superagent ;;
+            *) exit 1 ;;
+          esac
+          [ -n "$SSHPASS" ] || { echo '::error::DEPLOY_PASSWORD is missing'; exit 1; }
+          case "$DEPLOY_PORT" in *[!0-9]*|'') exit 1 ;; esac
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]] || exit 1
+          [[ "$DEPLOY_PUBLIC_IP" =~ ^[0-9.]+$ ]] || exit 1
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || exit 1
+          if [ "$TARGET_ENVIRONMENT" != production ]; then
+            [ -n "$GATEWAY_HTPASSWD" ] || { echo '::error::Environment GATEWAY_HTPASSWD is missing'; exit 1; }
+          fi
+          echo "DEPLOY_PATH=$deploy_path" >> "$GITHUB_ENV"
+          cp "deploy/environments/$TARGET_ENVIRONMENT.env" .deployment.env
+      - name: Install SSH client and trust server
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+          install -m 700 -d ~/.ssh
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" > ~/.ssh/known_hosts
+          fi
+          test -s ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Copy topology and bootstrap separate credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          sshpass -e scp -P "$DEPLOY_PORT" docker-compose.yml docker-compose.prod.yml .deployment.env "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+          sshpass -e scp -P "$DEPLOY_PORT" -r deploy "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+          sshpass -e scp -P "$DEPLOY_PORT" candidate-image-tags.env "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/.candidate-image-tags-$GITHUB_SHA"
+          if ! sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "test -s '$DEPLOY_PATH/.env'"; then
+            case "$TARGET_ENVIRONMENT" in
+              dev) bootstrap="$DEV_ENV_FILE" ;;
+              test) bootstrap="$TEST_ENV_FILE" ;;
+              production) bootstrap="$PROD_ENV_FILE" ;;
+            esac
+            [ -n "$bootstrap" ] || { echo "::error::The $TARGET_ENVIRONMENT environment file is missing"; exit 1; }
+            printf '%s' "$bootstrap" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "umask 077; cat > '$DEPLOY_PATH/.env.bootstrap'; test -s '$DEPLOY_PATH/.env.bootstrap'; mv '$DEPLOY_PATH/.env.bootstrap' '$DEPLOY_PATH/.env'"
+          fi
+          # Preserve the operator-validated environment file on later releases.
+          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "chmod 600 '$DEPLOY_PATH/.env'"
+          if [ "$TARGET_ENVIRONMENT" != production ]; then
+            printf '%s\n' "$GATEWAY_HTPASSWD" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "umask 077; cat > '$DEPLOY_PATH/.gateway.htpasswd'"
+          fi
+          printf '%s' "$LETSENCRYPT_EMAIL" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "umask 077; cat > '$DEPLOY_PATH/.letsencrypt-email'"
+          printf '%s' "$GHCR_TOKEN" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+      - name: Release and restore previous images on failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "bash '$DEPLOY_PATH/deploy/scripts/release-environment.sh' '$DEPLOY_PATH' '$GITHUB_SHA' '$IMAGE_PREFIX' '$TARGET_ENVIRONMENT' '$DEPLOY_PUBLIC_IP'" </dev/null
+      - name: Verify public routing outside the server
+        run: bash deploy/scripts/verify-public-endpoints.sh

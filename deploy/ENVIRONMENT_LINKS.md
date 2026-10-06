@@ -2,8 +2,9 @@
 
 These are configured addresses, not confirmation that DNS or deployment is live.
 
-Deployment has three stages: CI, CD (publish all five images), Deploy.
-Push develop for dev, test for test, main for production. Manual runs select a target.
+The original CI, changed-service CD and release-record stages are preserved.
+A main release promotes dev -> test -> production, with approval at each environment.
+After dev succeeds, the tester may approve test to pull the SAME frozen images; production follows only after successful test and its own approval.
 
 Environment data, keys, networks, container names and ports are isolated.
 Management endpoints require the environment-specific Nginx password.

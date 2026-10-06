@@ -7,13 +7,29 @@ and links with `python deploy/scripts/render-environments.py`.
 
 ## Pipeline
 
-The workflow has exactly three stages: CI, CD (five parallel application image
-builds), Deploy. Pushes to `develop`, `test`, and `main` target `dev`, `test`, and
-`production` respectively. A manual dispatch selects an environment; production
-always requires the `main` ref and keeps its existing environment approval rule.
-Each release deploys a complete set of commit-tagged images. The frontend uses
-same-origin `/v1/` authentication in every environment, so no build points a dev
-user at production Identity. Environment-specific `:stable` fallbacks are not used.
+The original workflow stages and granular changed-service build jobs are retained:
+CI, changed-service detection/CD, deployment, and recording the last successful
+production release. Pushes to `main` (or manual runs on `main`) produce a candidate.
+`develop` continues running standalone CI and does not deploy a separate release.
+
+The deployment part is now **dev approval -> dev deploy/verify -> test approval ->
+test deploy/verify -> production approval -> production deploy/verify**. Each
+approval is optional: the reviewer can leave the release waiting rather than pull
+it into that environment. Test is never offered before dev succeeds, and production
+is never offered before test succeeds. There is no target selector that skips an
+upstream environment.
+
+The tester selects **Review deployments / Approve and deploy** on the same workflow
+run to pull the accepted development candidate. The production reviewer does the
+same after successful testing. No image is rebuilt when moving between estates.
+A frozen manifest combines new images for changed services and the exact image
+versions from the last successful production manifest for unchanged services.
+All three estates download the same immutable workflow artifact. Missing or expired
+baseline artifacts rebuild all services at CD, never substitute a mutable stable tag.
+The original `production-deployed` tag advances only after production succeeds.
+
+The frontend uses same-origin `/v1/` authentication in every environment, so a dev
+user is never sent to production Identity.
 
 By default, all estates use the existing server `13.140.153.131`. Separate servers
 are supported with environment variables `DEPLOY_HOST`, `DEPLOY_PUBLIC_IP`,
@@ -22,9 +38,9 @@ Each directory contains its own persistent `.env` and release manifest:
 
 | Environment | Server directory | Compose project | Branch |
 | --- | --- | --- | --- |
-| dev | `/opt/superagent-dev` | `superagent-dev` | `develop` |
-| test | `/opt/superagent-test` | `superagent-test` | `test` |
-| production | `/opt/superagent` | `superagent` | `main` |
+| dev | `/opt/superagent-dev` | `superagent-dev` | `main` candidate, dev approval |
+| test | `/opt/superagent-test` | `superagent-test` | Same accepted dev candidate, test approval |
+| production | `/opt/superagent` | `superagent` | Same accepted test candidate, production approval |
 
 Production retains the previous project, container, network and volume names.
 Nonproduction uses new names and different loopback ports. No production database
@@ -34,8 +50,22 @@ is copied into a nonproduction environment. Deployment never deletes volumes.
 
 A repository administrator creates `dev` and `test` environments and preserves the
 existing `Production` environment and its reviewers. GitHub environment names are
-case-insensitive. Restrict their deployment branches to the appropriate branch.
-Do not disable production approval to make a first run pass.
+case-insensitive. Dev and test must have the SAME reviewers, self-review setting,
+wait timer and administrator-bypass setting as Production. All estates accept the
+`main` release ref, rather than requiring separate dev/test branches.
+
+An administrator can copy and verify the policy without changing Production:
+
+```sh
+python deploy/scripts/approval-policy.py --repo mohamedahmedma/SuperAgent --plan
+python deploy/scripts/approval-policy.py --repo mohamedahmedma/SuperAgent --apply
+```
+
+With an existing selected-branch policy, copy the corresponding branch rules in
+GitHub Settings too; the helper declines to invent those rules. The workflow checks
+that all three protected environments exist and match BEFORE publishing or deploying.
+A missing or unprotected dev/test environment fails closed, rather than being implicitly
+created without reviewers. Do not disable any approval to make a first run pass.
 
 | Secret | Scope and purpose |
 | --- | --- |
@@ -87,9 +117,9 @@ Milvus and Attu have no production public hostname in this configuration.
 ## Verification and rollback
 
 CI checks generated topology and shell syntax alongside the existing application
-suite. Deploy pulls all application images before recreating them, reconciles and
+suite. Deploy pulls the frozen manifest's application images before recreating them, reconciles and
 authenticates PostgreSQL using the existing `apply-env.sh`, waits for application
-health and backend readiness, then proves the running images match the release.
+health and backend readiness, then proves the running images match each service version in the accepted manifest.
 It installs certificates and Nginx only after application health succeeds.
 The server and the GitHub runner both check public URLs; management hosts must
 refuse unauthenticated requests. These checks do not substitute for an operator
